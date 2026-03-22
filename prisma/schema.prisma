@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  banks        Bank[]
+  transactions    Transaction[]
+  creditCardBills CreditCardBill[]
+}
+
+// ─── Bank & Card ─────────────────────────────────────────────────────────────
+
+model Bank {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  color          String
+  openingBalance Float    @default(0)
+  createdAt      DateTime @default(now())
+  cards          Card[]
+  transactions   Transaction[]
+}
+
+model Card {
+  id           String        @id @default(cuid())
+  bankId       String
+  bank         Bank          @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  type         String
+  nickname     String
+  last4        String?
+  createdAt       DateTime      @default(now())
+  transactions    Transaction[]
+  creditCardBills CreditCardBill[]
+}
+
+// ─── Transaction ─────────────────────────────────────────────────────────────
+
+model Transaction {
+  id              String   @id @default(cuid())
+  refNo           String
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date            String
+  narration       String
+  amount          Float
+  category        String?
+  transactionType String
+  paymentMethod   String?
+  confidence      Float?
+  annotated       Boolean  @default(false)
+  splitStatus     String   @default("none")
+  splitSettledAmt Float?
+  closingBalance  Float?
+  statementType   String?
+  bankId          String?
+  bank            Bank?    @relation(fields: [bankId], references: [id])
+  cardId          String?
+  card            Card?    @relation(fields: [cardId], references: [id])
+  linkedBillId    String?
+  linkedBill      CreditCardBill? @relation(fields: [linkedBillId], references: [id])
+  importedAt      DateTime @default(now())
+
+  @@unique([userId, refNo])
+}
+
+model CreditCardBill {
+  id           String        @id @default(cuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardId       String
+  card         Card          @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cycleName    String
+  billAmount   Float
+  dueDate      String?       
+  isPaid       Boolean       @default(false)
+  transactions Transaction[] 
+  createdAt    DateTime      @default(now())
+  
+  @@unique([cardId, cycleName])
+}
