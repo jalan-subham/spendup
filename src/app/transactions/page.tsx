@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   FileUp, CheckCircle2, Loader2, AlertTriangle, ArrowUpRight, ArrowDownRight,
   Scissors, Building2, ChevronRight, Search, RefreshCw,
@@ -637,6 +638,13 @@ const TX_TYPE_LABELS: Record<string, string> = {
   refund_settlement: "Refund Settle",
 };
 
+const SPLIT_STATUS_LABELS: Record<NonNullable<Transaction["splitStatus"]>, string> = {
+  none: "Not Split",
+  to_split: "To Split",
+  splitwise_logged: "On Splitwise",
+  settled: "Cleared",
+};
+
 function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNext }: {
   transactions: Transaction[];
   bills: any[];
@@ -1001,6 +1009,7 @@ function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNe
 
 export default function ImportPage() {
   const { banks, loaded } = useAccounts();
+  const [activeTab, setActiveTab] = useState<"import" | "split_tracker" | "manual_add">("import");
   const [step, setStep] = useState(1);
   const [sources, setSources] = useState<StatementSource[]>([]);
   const [parserId, setParserId] = useState<ParserId | "">("");
@@ -1022,6 +1031,30 @@ export default function ImportPage() {
   const transportMetaSelected = selectedMetaIds.includes("transport_upi_150_250");
 
   const [saved, setSaved] = useState(false);
+  const [ledgerTransactions, setLedgerTransactions] = useState<Transaction[]>([]);
+  const [trackerLoading, setTrackerLoading] = useState(false);
+  const [trackerError, setTrackerError] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
+  const [manualMessage, setManualMessage] = useState("");
+  const [manualTx, setManualTx] = useState({
+    id: "",
+    refNo: "",
+    date: "",
+    narration: "",
+    amount: "",
+    category: "Other",
+    transactionType: "spend" as Transaction["transactionType"],
+    paymentMethod: "Other" as PaymentMethod,
+    confidence: "",
+    annotated: true,
+    splitStatus: "none" as NonNullable<Transaction["splitStatus"]>,
+    splitSettledAmount: "",
+    bankId: "",
+    cardId: "",
+    statementType: "bank_account" as StatementType,
+    closingBalance: "",
+    linkedBillId: "",
+  });
 
   // Load existing refNos for dedup check (from DB)
   const getExistingRefNos = async (): Promise<Set<string>> => {
@@ -1042,6 +1075,96 @@ export default function ImportPage() {
     if (!res.ok) throw new Error("Failed to persist transactions");
     return res.json();
   }
+
+  const loadLedgerTransactions = useCallback(async () => {
+    setTrackerLoading(true);
+    setTrackerError("");
+    try {
+      const res = await fetch("/api/transactions");
+      if (!res.ok) throw new Error("Failed to load transactions");
+      const data: Transaction[] = await res.json();
+      setLedgerTransactions(data);
+    } catch (e) {
+      setTrackerError(e instanceof Error ? e.message : "Failed to load transactions");
+    } finally {
+      setTrackerLoading(false);
+    }
+  }, []);
+
+  const updateSplitStatus = useCallback(async (id: string, splitStatus: NonNullable<Transaction["splitStatus"]>) => {
+    const res = await fetch("/api/transactions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, splitStatus }),
+    });
+
+    if (!res.ok) {
+      throw new Error("Failed to update split status");
+    }
+
+    setLedgerTransactions((prev) => prev.map((tx) => (tx.id === id ? { ...tx, splitStatus } : tx)));
+  }, []);
+
+  const handleManualCreate = useCallback(async () => {
+    setManualMessage("");
+
+    const amount = Number(manualTx.amount);
+    if (!manualTx.refNo.trim() || !manualTx.date.trim() || !manualTx.narration.trim() || Number.isNaN(amount)) {
+      setManualMessage("refNo, date, narration and amount are required.");
+      return;
+    }
+
+    const confidence = manualTx.confidence.trim() ? Number(manualTx.confidence) : undefined;
+    const splitSettledAmount = manualTx.splitSettledAmount.trim() ? Number(manualTx.splitSettledAmount) : undefined;
+    const closingBalance = manualTx.closingBalance.trim() ? Number(manualTx.closingBalance) : undefined;
+
+    if ((confidence != null && Number.isNaN(confidence)) || (splitSettledAmount != null && Number.isNaN(splitSettledAmount)) || (closingBalance != null && Number.isNaN(closingBalance))) {
+      setManualMessage("confidence, split settled amount, and closing balance must be valid numbers.");
+      return;
+    }
+
+    const payload: Transaction = {
+      id: manualTx.id.trim() || `manual-${Date.now()}`,
+      refNo: manualTx.refNo.trim(),
+      date: manualTx.date.trim(),
+      narration: manualTx.narration.trim(),
+      amount,
+      category: manualTx.category || undefined,
+      transactionType: manualTx.transactionType,
+      paymentMethod: manualTx.paymentMethod,
+      confidence,
+      annotated: manualTx.annotated,
+      splitStatus: manualTx.splitStatus,
+      splitSettledAmount,
+      bankId: manualTx.bankId.trim() || undefined,
+      cardId: manualTx.cardId.trim() || undefined,
+      statementType: manualTx.statementType,
+      closingBalance,
+      linkedBillId: manualTx.linkedBillId.trim() || undefined,
+    };
+
+    setManualBusy(true);
+    try {
+      const res = await fetch("/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactions: [payload] }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Failed to create transaction");
+
+      if (result.saved === 1) {
+        setManualMessage("Transaction saved.");
+        await loadLedgerTransactions();
+      } else {
+        setManualMessage("No transaction created (likely duplicate refNo for this user).");
+      }
+    } catch (e) {
+      setManualMessage(e instanceof Error ? e.message : "Failed to create transaction");
+    } finally {
+      setManualBusy(false);
+    }
+  }, [manualTx, loadLedgerTransactions]);
 
   const handleParsed = async (m: HdfcStatementMeta, rows: HdfcRawRow[], name: string) => {
     setMeta(m);
@@ -1207,54 +1330,255 @@ export default function ImportPage() {
     });
   };
 
+  useEffect(() => {
+    if (activeTab !== "import") {
+      loadLedgerTransactions();
+    }
+  }, [activeTab, loadLedgerTransactions]);
+
   if (!loaded) return null;
+
+  const splitTracked = ledgerTransactions
+    .filter((tx) => tx.splitStatus && tx.splitStatus !== "none")
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
 
   return (
     <div className="p-8 space-y-6 max-w-[1300px]">
       <div>
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-1">ETL Pipeline</p>
-        <h1 className="text-2xl font-semibold tracking-tight">Import Statement</h1>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-1">Transaction Workspace</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
       </div>
 
-      {saved && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 flex items-center gap-3 text-emerald-700">
-          <CheckCircle2 className="h-5 w-5" />
-          <div>
-            <p className="text-sm font-semibold">Transactions saved!</p>
-            <p className="text-xs">They are now available in your <Link href="/" className="underline">dashboard</Link>.</p>
-          </div>
-        </div>
-      )}
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "import" | "split_tracker" | "manual_add")} className="space-y-5">
+        <TabsList>
+          <TabsTrigger value="import">Import</TabsTrigger>
+          <TabsTrigger value="split_tracker">Split Tracker</TabsTrigger>
+          <TabsTrigger value="manual_add">Add Transaction</TabsTrigger>
+        </TabsList>
 
-      <StepBar current={step} />
+        <TabsContent value="import" className="space-y-6">
+          {saved && (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 flex items-center gap-3 text-emerald-700">
+              <CheckCircle2 className="h-5 w-5" />
+              <div>
+                <p className="text-sm font-semibold">Transactions saved!</p>
+                <p className="text-xs">They are now available in your <Link href="/" className="underline">dashboard</Link>.</p>
+              </div>
+            </div>
+          )}
 
-      {step === 1 && (
-        <Step1Upload
-          banks={banks}
-          bills={bills}
-          sources={sources}
-          setSources={setSources}
-          parserId={parserId}
-          setParserId={setParserId}
-          uploadKind={uploadKind}
-          setUploadKind={setUploadKind}
-          selectedCcBillId={selectedCcBillId}
-          setSelectedCcBillId={setSelectedCcBillId}
-          onParsed={handleParsed}
-        />
-      )}
-      {step === 2 && meta && (
-        <Step2Validate
-          meta={meta}
-          rowCount={rawRows.filter(r => !duplicates.includes(r.refNo)).length}
-          duplicates={duplicates}
-          selectedMetaIds={selectedMetaIds}
-          onToggleMeta={toggleMeta}
-          onConfirm={handleValidated}
-        />
-      )}
-      {step === 3 && <Step3Classify progress={classifyProgress} total={classifyTotal} current={classifyLabel} />}
-      {step === 4 && <Step4Review bills={bills} banks={banks} transactions={transactions} onUpdate={updateTx} onBillCreated={handleBillCreated} onNext={handleConfirm} />}
+          <StepBar current={step} />
+
+          {step === 1 && (
+            <Step1Upload
+              banks={banks}
+              bills={bills}
+              sources={sources}
+              setSources={setSources}
+              parserId={parserId}
+              setParserId={setParserId}
+              uploadKind={uploadKind}
+              setUploadKind={setUploadKind}
+              selectedCcBillId={selectedCcBillId}
+              setSelectedCcBillId={setSelectedCcBillId}
+              onParsed={handleParsed}
+            />
+          )}
+          {step === 2 && meta && (
+            <Step2Validate
+              meta={meta}
+              rowCount={rawRows.filter((r) => !duplicates.includes(r.refNo)).length}
+              duplicates={duplicates}
+              selectedMetaIds={selectedMetaIds}
+              onToggleMeta={toggleMeta}
+              onConfirm={handleValidated}
+            />
+          )}
+          {step === 3 && <Step3Classify progress={classifyProgress} total={classifyTotal} current={classifyLabel} />}
+          {step === 4 && <Step4Review bills={bills} banks={banks} transactions={transactions} onUpdate={updateTx} onBillCreated={handleBillCreated} onNext={handleConfirm} />}
+        </TabsContent>
+
+        <TabsContent value="split_tracker" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-semibold">Splitwise Tracker</CardTitle>
+              <CardDescription className="text-xs">
+                Track spend transactions from your ledger and update their Splitwise lifecycle.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {trackerError && <p className="text-xs text-destructive">{trackerError}</p>}
+
+              {trackerLoading ? (
+                <p className="text-xs text-muted-foreground">Loading split tracker...</p>
+              ) : splitTracked.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No split-tracked transactions yet.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Date</TableHead>
+                      <TableHead className="text-xs">Narration</TableHead>
+                      <TableHead className="text-xs text-right">Amount</TableHead>
+                      <TableHead className="text-xs">Status</TableHead>
+                      <TableHead className="text-xs">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {splitTracked.map((tx) => (
+                      <TableRow key={tx.id}>
+                        <TableCell className="text-xs">{tx.date}</TableCell>
+                        <TableCell className="text-xs max-w-[420px] truncate">{tx.narration}</TableCell>
+                        <TableCell className="text-xs text-right">{formatINR(tx.amount)}</TableCell>
+                        <TableCell className="text-xs">{SPLIT_STATUS_LABELS[tx.splitStatus || "none"]}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2 flex-wrap">
+                            {tx.splitStatus === "to_split" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-[10px]"
+                                onClick={async () => {
+                                  try {
+                                    await updateSplitStatus(tx.id, "splitwise_logged");
+                                  } catch {
+                                    alert("Failed to mark as put on Splitwise.");
+                                  }
+                                }}
+                              >
+                                Mark Put On Splitwise
+                              </Button>
+                            )}
+                            {(tx.splitStatus === "to_split" || tx.splitStatus === "splitwise_logged") && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-[10px]"
+                                onClick={async () => {
+                                  try {
+                                    await updateSplitStatus(tx.id, "settled");
+                                  } catch {
+                                    alert("Failed to mark as cleared.");
+                                  }
+                                }}
+                              >
+                                Mark Splitwise Cleared
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-7 text-[10px]"
+                              onClick={async () => {
+                                const confirmed = window.confirm("This will remove this transaction from split tracking. Continue?");
+                                if (!confirmed) return;
+                                try {
+                                  await updateSplitStatus(tx.id, "none");
+                                } catch {
+                                  alert("Failed to mark as unsplit.");
+                                }
+                              }}
+                            >
+                              Mark Unsplit
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="manual_add" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-semibold">Manual Transaction Entry</CardTitle>
+              <CardDescription className="text-xs">
+                Enter all fields directly for personal logging.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Input placeholder="id (optional)" value={manualTx.id} onChange={(e) => setManualTx((prev) => ({ ...prev, id: e.target.value }))} />
+                <Input placeholder="refNo (required)" value={manualTx.refNo} onChange={(e) => setManualTx((prev) => ({ ...prev, refNo: e.target.value }))} />
+                <Input placeholder="date (required)" value={manualTx.date} onChange={(e) => setManualTx((prev) => ({ ...prev, date: e.target.value }))} />
+
+                <Input placeholder="narration (required)" value={manualTx.narration} onChange={(e) => setManualTx((prev) => ({ ...prev, narration: e.target.value }))} className="md:col-span-3" />
+                <Input type="number" placeholder="amount (required)" value={manualTx.amount} onChange={(e) => setManualTx((prev) => ({ ...prev, amount: e.target.value }))} />
+                <Input type="number" placeholder="confidence (optional)" value={manualTx.confidence} onChange={(e) => setManualTx((prev) => ({ ...prev, confidence: e.target.value }))} />
+                <Input type="number" placeholder="closing balance (optional)" value={manualTx.closingBalance} onChange={(e) => setManualTx((prev) => ({ ...prev, closingBalance: e.target.value }))} />
+
+                <Input type="number" placeholder="split settled amount (optional)" value={manualTx.splitSettledAmount} onChange={(e) => setManualTx((prev) => ({ ...prev, splitSettledAmount: e.target.value }))} />
+                <Input placeholder="bankId (optional)" value={manualTx.bankId} onChange={(e) => setManualTx((prev) => ({ ...prev, bankId: e.target.value }))} />
+                <Input placeholder="cardId (optional)" value={manualTx.cardId} onChange={(e) => setManualTx((prev) => ({ ...prev, cardId: e.target.value }))} />
+
+                <Input placeholder="linkedBillId (optional)" value={manualTx.linkedBillId} onChange={(e) => setManualTx((prev) => ({ ...prev, linkedBillId: e.target.value }))} />
+
+                <Select value={manualTx.transactionType} onValueChange={(value) => setManualTx((prev) => ({ ...prev, transactionType: value as Transaction["transactionType"] }))}>
+                  <SelectTrigger><SelectValue placeholder="transactionType" /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(TX_TYPE_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={manualTx.paymentMethod} onValueChange={(value) => setManualTx((prev) => ({ ...prev, paymentMethod: value as PaymentMethod }))}>
+                  <SelectTrigger><SelectValue placeholder="paymentMethod" /></SelectTrigger>
+                  <SelectContent>
+                    {["UPI", "Debit", "Credit Card", "Net Banking", "Cash", "Other"].map((value) => (
+                      <SelectItem key={value} value={value}>{value}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={manualTx.category || "Other"} onValueChange={(value) => setManualTx((prev) => ({ ...prev, category: value ?? "Other" }))}>
+                  <SelectTrigger><SelectValue placeholder="category" /></SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map((value) => (
+                      <SelectItem key={value} value={value}>{value}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={manualTx.statementType} onValueChange={(value) => setManualTx((prev) => ({ ...prev, statementType: value as StatementType }))}>
+                  <SelectTrigger><SelectValue placeholder="statementType" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bank_account">bank_account</SelectItem>
+                    <SelectItem value="credit_card">credit_card</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select value={manualTx.splitStatus} onValueChange={(value) => setManualTx((prev) => ({ ...prev, splitStatus: value as NonNullable<Transaction["splitStatus"]> }))}>
+                  <SelectTrigger><SelectValue placeholder="splitStatus" /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(SPLIT_STATUS_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={manualTx.annotated ? "true" : "false"} onValueChange={(value) => setManualTx((prev) => ({ ...prev, annotated: value === "true" }))}>
+                  <SelectTrigger><SelectValue placeholder="annotated" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">annotated: true</SelectItem>
+                    <SelectItem value="false">annotated: false</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {manualMessage && <p className="text-xs text-muted-foreground">{manualMessage}</p>}
+
+              <Button onClick={handleManualCreate} disabled={manualBusy}>
+                {manualBusy ? "Saving..." : "Save Manual Transaction"}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

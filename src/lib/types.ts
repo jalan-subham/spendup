@@ -41,7 +41,7 @@ export interface StatementSource {
 
 export type TransactionType = "spend" | "income" | "income_debit" | "cc_settlement" | "investment" | "transfer_in" | "transfer_out" | "refund" | "refund_settlement";
 
-export type SplitStatus = "none" | "to_split" | "settled";
+export type SplitStatus = "none" | "to_split" | "splitwise_logged" | "settled";
 
 export type PaymentMethod = "UPI" | "Debit" | "Credit Card" | "Net Banking" | "Cash" | "Other";
 
