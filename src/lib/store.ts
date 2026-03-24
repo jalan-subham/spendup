@@ -3,6 +3,23 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Bank, Card, CardType } from "@/lib/types";
 
+async function parseJsonSafely<T>(res: Response): Promise<T | null> {
+  const raw = await res.text();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function getErrorMessage(res: Response): Promise<string> {
+  const data = await parseJsonSafely<{ error?: string; message?: string }>(res);
+  if (data?.error) return data.error;
+  if (data?.message) return data.message;
+  return `${res.status} ${res.statusText}`;
+}
+
 // ─── useAccounts ─────────────────────────────────────────────────────────────
 
 export function useAccounts() {
@@ -12,7 +29,11 @@ export function useAccounts() {
   // Initial load
   useEffect(() => {
     fetch("/api/banks")
-      .then(r => r.ok ? r.json() : [])
+      .then(async (r) => {
+        if (!r.ok) return [] as Bank[];
+        const data = await parseJsonSafely<Bank[]>(r);
+        return Array.isArray(data) ? data : [];
+      })
       .then((data: Bank[]) => {
         setBanks(data);
         setLoaded(true);
@@ -26,7 +47,16 @@ export function useAccounts() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, color, openingBalance: openingBalance ?? 0 }),
     });
-    const bank: Bank = await res.json();
+
+    if (!res.ok) {
+      throw new Error(await getErrorMessage(res));
+    }
+
+    const bank = await parseJsonSafely<Bank>(res);
+    if (!bank) {
+      throw new Error("Bank API returned an empty or invalid response.");
+    }
+
     setBanks(prev => [...prev, bank]);
     return bank;
   }, []);
@@ -42,7 +72,16 @@ export function useAccounts() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: bankId, ...patch }),
     });
-    const updated: Bank = await res.json();
+
+    if (!res.ok) {
+      throw new Error(await getErrorMessage(res));
+    }
+
+    const updated = await parseJsonSafely<Bank>(res);
+    if (!updated) {
+      throw new Error("Bank update API returned an empty or invalid response.");
+    }
+
     setBanks(prev => prev.map(b => b.id === bankId ? { ...b, ...updated } : b));
   }, []);
 
@@ -52,7 +91,16 @@ export function useAccounts() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type, nickname, last4 }),
     });
-    const card: Card = await res.json();
+
+    if (!res.ok) {
+      throw new Error(await getErrorMessage(res));
+    }
+
+    const card = await parseJsonSafely<Card>(res);
+    if (!card) {
+      throw new Error("Card API returned an empty or invalid response.");
+    }
+
     setBanks(prev => prev.map(b => b.id === bankId ? { ...b, cards: [...b.cards, card] } : b));
     return card;
   }, []);
