@@ -443,7 +443,7 @@ function Step1Upload({
 
             <div className="rounded-2xl border border-dashed bg-muted/20 p-6 md:p-8 text-center flex flex-col items-center justify-center min-h-[300px] cursor-pointer"
               onClick={() => !requiresPassword && canSelectFile && inputRef.current?.click()}>
-              <input ref={inputRef} type="file" accept=".txt,.text,.pdf" className="hidden"
+              <input ref={inputRef} type="file" accept=".txt,.text,.xls,.xlsx" className="hidden"
                 onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
               {loading ? (
                 <div className="space-y-3">

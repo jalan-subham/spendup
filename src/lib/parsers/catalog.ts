@@ -1,4 +1,4 @@
-export type ParserId = "hdfc_text" | "icici_pdf";
+export type ParserId = "hdfc_text" | "icici_xls";
 
 export interface ParserCatalogItem {
   id: ParserId;
@@ -19,12 +19,15 @@ export const PARSER_CATALOG: ParserCatalogItem[] = [
     acceptsPassword: false,
   },
   {
-    id: "icici_pdf",
-    label: "ICICI PDF Parser",
-    description: "Parses ICICI PDF statements and asks for password when required.",
-    supportedExtensions: [".pdf"],
-    supportedMimeTypes: ["application/pdf"],
-    acceptsPassword: true,
+    id: "icici_xls",
+    label: "ICICI XLS Parser",
+    description: "Parses ICICI transaction history exported as XLS/XLSX files.",
+    supportedExtensions: [".xls", ".xlsx"],
+    supportedMimeTypes: [
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ],
+    acceptsPassword: false,
   },
 ];
 

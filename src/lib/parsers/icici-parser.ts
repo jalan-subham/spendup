@@ -1,7 +1,9 @@
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
+import * as XLSX from "xlsx";
 
 // Types
 export interface Transaction {
+  serialNo: string;
+  sourceRowNo: number;
   date: string;
   description: string;
   type: 'DEPOSIT' | 'WITHDRAWAL';
@@ -13,7 +15,6 @@ export interface ParseResult {
   success: boolean;
   transactions?: Transaction[];
   error?: string;
-  passwordRequired?: boolean;
 }
 
 /**
@@ -21,143 +22,130 @@ export interface ParseResult {
  * Example: "1,03,862.00" -> 103862.00
  */
 function parseAmount(amtStr: string): number {
-  return parseFloat(amtStr.replace(/,/g, ''));
+  if (!amtStr) return 0;
+  const cleaned = String(amtStr).replace(/,/g, '').trim();
+  const parsed = parseFloat(cleaned);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function normalizeDate(dateStr: string): string {
+  const raw = String(dateStr || "").trim();
+  if (!raw) return "";
+
+  // ICICI XLS often exports as DD,MM,YYYY.
+  if (/^\d{2},\d{2},\d{4}$/.test(raw)) {
+    const [d, m, y] = raw.split(",");
+    return `${d}-${m}-${y}`;
+  }
+
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) {
+    const [d, m, y] = raw.split("/");
+    return `${d}-${m}-${y}`;
+  }
+
+  return raw;
+}
+
+function isNonEmpty(value: unknown): boolean {
+  return String(value ?? "").trim() !== "";
 }
 
 /**
- * Parses an ICICI Bank Statement PDF
+ * Parses an ICICI Bank Statement XLS/XLSX
  */
 export async function parseIciciStatement(
   buffer: Uint8Array,
-  password?: string
+  _password?: string
 ): Promise<ParseResult> {
   try {
-    // Attempt to load the document
-    const loadingTask = pdfjsLib.getDocument({
-      data: buffer,
-      password: password,
-      useSystemFonts: true,
+    const workbook = XLSX.read(buffer, { type: "array", raw: false });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) {
+      return { success: false, error: "No worksheet found in ICICI file" };
+    }
+
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      raw: false,
+      defval: "",
+      blankrows: true,
+    }) as string[][];
+
+    if (!rows.length) {
+      return { success: false, error: "No rows found in ICICI sheet" };
+    }
+
+    const headerRowIndex = rows.findIndex((row) => {
+      const sNo = String(row[1] || "").trim().toLowerCase();
+      const txDate = String(row[3] || "").trim().toLowerCase();
+      const remarks = String(row[5] || "").trim().toLowerCase();
+      return sNo === "s no." && txDate === "transaction date" && remarks === "transaction remarks";
     });
 
-    const pdfDocument = await loadingTask.promise;
-
-    let fullText = '';
-
-    // Extract text from all pages
-    for (let i = 1; i <= pdfDocument.numPages; i++) {
-      const page = await pdfDocument.getPage(i);
-      const textContent = await page.getTextContent();
-      
-      // For each line, we try to reconstruct it. 
-      // pdf.js items aren't always perfectly ordered or spaced, but .join(' ') is usually good enough for ICICI statements
-      const pageText = textContent.items.map((item: any) => item.str).join(' ');
-      fullText += pageText + ' \n ';
+    if (headerRowIndex === -1) {
+      return { success: false, error: "Could not locate ICICI transactions header row" };
     }
 
-    return extractTransactions(fullText);
-  } catch (error: any) {
-    if (error.name === 'PasswordException' || error.message?.includes('Password')) {
-      return { success: false, error: 'Password required or incorrect', passwordRequired: true };
-    }
-    console.error('Error parsing PDF:', error);
-    return { success: false, error: error.message || 'Unknown parsing error' };
-  }
-}
+    const transactions: Transaction[] = [];
+    let lastTx: Transaction | null = null;
 
-function extractTransactions(text: string): ParseResult {
-  // We only want the Savings Account transactions, not Fixed Deposits
-  const startKeyword = "Statement of Transactions in Savings Account";
-  const startIndex = text.indexOf(startKeyword);
-  
-  let processText = text;
-  if (startIndex !== -1) {
-    processText = text.substring(startIndex);
-  }
+    for (let i = headerRowIndex + 1; i < rows.length; i++) {
+      const row = rows[i] ?? [];
+      const serial = String(row[1] || "").trim();
+      const txDate = String(row[3] || "").trim();
+      const remarks = String(row[5] || "").trim();
+      const withdrawal = parseAmount(String(row[6] || ""));
+      const deposit = parseAmount(String(row[7] || ""));
+      const balance = parseAmount(String(row[8] || ""));
 
-  const transactions: Transaction[] = [];
-  
-  // 1. Find the starting balance ("B/F" line)
-  const bfMatch = processText.match(/(\d{2}-\d{2}-\d{4})\s+B\/F\s+([\d,]+\.\d{2})/i);
-  let runningBalance = 0;
-  if (bfMatch) {
-    runningBalance = parseAmount(bfMatch[2]);
-  } else {
-    console.warn("Could not find Brought Forward (B/F) balance. Running balance logic might be off for the very first transaction if it's not present.");
-  }
+      const isDataRow = /^\d+$/.test(serial) && isNonEmpty(txDate) && isNonEmpty(remarks);
+      const isContinuationRow = !serial && isNonEmpty(remarks) && !isNonEmpty(txDate);
 
-  // 2. Tokenize by dates
-  const chunks = processText.split(/(?=\d{2}-\d{2}-\d{4}\s+)/);
+      if (isDataRow) {
+        const type: 'DEPOSIT' | 'WITHDRAWAL' = deposit > 0 ? 'DEPOSIT' : 'WITHDRAWAL';
+        const amount = deposit > 0 ? deposit : withdrawal;
 
-  for (const chunk of chunks) {
-    const chunkTrimmed = chunk.trim();
-    if (!chunkTrimmed.match(/^\d{2}-\d{2}-\d{4}/)) continue; // Must start with date
-    
-    // Ignore B/F line
-    if (chunkTrimmed.includes('B/F')) continue;
+        const tx: Transaction = {
+          serialNo: serial,
+          sourceRowNo: i + 1,
+          date: normalizeDate(txDate),
+          description: remarks,
+          type,
+          amount,
+          balance,
+        };
 
-    // Extract Date
-    const dateStr = chunkTrimmed.substring(0, 10);
-    
-    // The chunk should contain numbers at the end: AMOUNT and BALANCE
-    // Because of weird wrapping, let's find all numbers that look like XX.XX or X,XX.XX at the end of the chunk
-    const numberMatches = [...chunkTrimmed.matchAll(/([\d,]+\.\d{2})/g)];
-    
-    if (numberMatches.length >= 2) {
-      // The last two numbers are usually AMOUNT and BALANCE
-      const balanceStr = numberMatches[numberMatches.length - 1][1];
-      const amountStr = numberMatches[numberMatches.length - 2][1];
-      
-      const balance = parseAmount(balanceStr);
-      const amount = parseAmount(amountStr);
-      
-      // Determine if deposit or withdrawal based on running balance
-      // Wait, let's check Math.abs to account for floating point weirdness
-      const diffDeposit = Math.abs((runningBalance + amount) - balance);
-      const diffWithdrawal = Math.abs((runningBalance - amount) - balance);
-      
-      let type: 'DEPOSIT' | 'WITHDRAWAL' = 'WITHDRAWAL';
-      
-      if (diffDeposit < 0.01) {
-        type = 'DEPOSIT';
-        runningBalance = balance;
-      } else if (diffWithdrawal < 0.01) {
-        type = 'WITHDRAWAL';
-        runningBalance = balance;
-      } else {
-        // If it doesn't match perfectly, ICICI might have just skipped reporting a grouped transaction or there's an error in parsing.
-        // Let's fallback to checking if balance increased or decreased compared to running balance
-        if (balance > runningBalance) {
-          type = 'DEPOSIT';
-        } else {
-          type = 'WITHDRAWAL';
-        }
-        runningBalance = balance; // Resync
+        transactions.push(tx);
+        lastTx = tx;
+        continue;
       }
 
-      // Description is everything between the date and the amount
-      // Let's remove the amounts from the text
-      let description = chunkTrimmed
-        .substring(10) // remove date
-        .replace(amountStr, '')
-        .replace(balanceStr, '')
-        .trim();
-      
-      // Clean up random noise (UPI/, redundant spaces, "Paid via C/")
-      // We'll keep it simple for now, just compress whitespace
-      description = description.replace(/\s+/g, ' ');
+      // ICICI often wraps long remarks into the next row with blank serial/date columns.
+      if (isContinuationRow && lastTx) {
+        lastTx.description = `${lastTx.description} ${remarks}`.replace(/\s+/g, " ").trim();
+        continue;
+      }
 
-      transactions.push({
-        date: dateStr,
-        description,
-        type,
-        amount,
-        balance
-      });
+      // Once data rows have started, stop if we encounter a fully blank row block.
+      if (transactions.length > 0 && row.every((cell) => !isNonEmpty(cell))) {
+        break;
+      }
     }
-  }
 
-  return {
-    success: true,
-    transactions
-  };
+    if (!transactions.length) {
+      return { success: false, error: "No transaction rows parsed from ICICI sheet" };
+    }
+
+    return {
+      success: true,
+      transactions,
+    };
+  } catch (error: unknown) {
+    console.error("Error parsing ICICI XLS:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown parsing error",
+    };
+  }
 }

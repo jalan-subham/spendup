@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     const file = formData.get('file') as File;
     const password = formData.get('password') as string | undefined;
     const parserIdRaw = formData.get('parserId') as string | null;
-    const parserId = (parserIdRaw || 'icici_pdf') as ParserId;
+    const parserId = (parserIdRaw || 'icici_xls') as ParserId;
     const legacyMode = !parserIdRaw;
 
     if (!file) {

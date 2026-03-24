@@ -32,7 +32,7 @@ function buildIciciMeta(rows: HdfcRawRow[]): HdfcStatementMeta {
   const crRows = rows.filter((row) => row.deposit != null);
 
   return {
-    accountNo: "ICICI PDF",
+    accountNo: "ICICI XLS",
     customerName: "Imported User",
     startDate,
     endDate,
@@ -61,7 +61,7 @@ async function executeHdfcTextParser(buffer: Uint8Array): Promise<ExecuteParserR
   }
 }
 
-async function executeIciciPdfParser(buffer: Uint8Array, password?: string): Promise<ExecuteParserResult> {
+async function executeIciciXlsParser(buffer: Uint8Array, password?: string): Promise<ExecuteParserResult> {
   const result = await parseIciciStatement(buffer, password);
   if (!result.success) {
     return {
@@ -72,8 +72,8 @@ async function executeIciciPdfParser(buffer: Uint8Array, password?: string): Pro
   }
 
   const txs = result.transactions ?? [];
-  const rows: HdfcRawRow[] = txs.map((tx, index) => ({
-    refNo: `ICICI-${tx.date}-${index}-${Math.round(tx.amount * 100)}`,
+  const rows: HdfcRawRow[] = txs.map((tx) => ({
+    refNo: `ICICI-XLS-S${tx.serialNo}-R${tx.sourceRowNo}-${tx.date}`,
     date: tx.date,
     narration: tx.description,
     valueDate: tx.date,
@@ -101,7 +101,7 @@ export async function executeParserById(
   if (!parser) return { success: false, error: "Unknown parser" };
 
   if (parserId === "hdfc_text") return executeHdfcTextParser(buffer);
-  if (parserId === "icici_pdf") return executeIciciPdfParser(buffer, password);
+  if (parserId === "icici_xls") return executeIciciXlsParser(buffer, password);
 
   return { success: false, error: "Parser not implemented" };
 }
