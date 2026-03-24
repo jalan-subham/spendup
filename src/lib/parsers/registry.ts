@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 
 import { parseHdfcText } from "@/lib/parsers/hdfc-text";
 import type { HdfcRawRow, HdfcStatementMeta } from "@/lib/parsers/hdfc-text";
@@ -66,14 +67,28 @@ async function executeIciciXlsParser(buffer: Uint8Array, password?: string): Pro
   if (!result.success) {
     return {
       success: false,
-      error: result.error || "Failed to parse PDF statement",
-      passwordRequired: result.passwordRequired,
+      error: result.error || "Failed to parse ICICI XLS statement",
     };
   }
 
+  const buildIciciTransactionRef = (tx: IciciTransaction): string => {
+    const canonicalNarration = tx.description.toLowerCase().replace(/\s+/g, " ").trim();
+    const fingerprint = [
+      "icici",
+      tx.date,
+      tx.type,
+      tx.amount.toFixed(2),
+      tx.balance.toFixed(2),
+      canonicalNarration,
+    ].join("|");
+
+    const hash = createHash("sha1").update(fingerprint).digest("hex");
+    return `ICICI-TX-${hash.slice(0, 24)}`;
+  };
+
   const txs = result.transactions ?? [];
   const rows: HdfcRawRow[] = txs.map((tx) => ({
-    refNo: `ICICI-XLS-S${tx.serialNo}-R${tx.sourceRowNo}-${tx.date}`,
+    refNo: buildIciciTransactionRef(tx),
     date: tx.date,
     narration: tx.description,
     valueDate: tx.date,
