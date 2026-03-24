@@ -266,7 +266,7 @@ function Step1Upload({
                 <div className="space-y-3 rounded-lg border bg-gradient-to-b from-background to-muted/20 p-3">
                   <p className="text-[11px] font-semibold text-foreground">CC Flow</p>
                   <p className="text-[10px] text-muted-foreground -mt-2">Select bank, credit card, then billing cycle.</p>
-                  <Select value={ccBankId} onValueChange={(value) => { setCcBankId(value); setCcCardId(""); setSelectedCcBillId(""); }}>
+                  <Select value={ccBankId} onValueChange={(value) => { setCcBankId(value ?? ""); setCcCardId(""); setSelectedCcBillId(""); }}>
                     <SelectTrigger className="h-8 text-xs">
                       <SelectValue placeholder="Select bank">
                         {selectedCcBank?.name}
@@ -279,7 +279,7 @@ function Step1Upload({
                     </SelectContent>
                   </Select>
 
-                  <Select value={ccCardId} onValueChange={(value) => { setCcCardId(value); setSelectedCcBillId(""); }}>
+                  <Select value={ccCardId} onValueChange={(value) => { setCcCardId(value ?? ""); setSelectedCcBillId(""); }}>
                     <SelectTrigger className="h-8 text-xs" disabled={!ccBankId}>
                       <SelectValue placeholder="Select credit card">
                         {ccCards.find((card) => card.id === ccCardId)?.nickname}
@@ -294,7 +294,7 @@ function Step1Upload({
                     </SelectContent>
                   </Select>
 
-                  <Select value={selectedCcBillId} onValueChange={setSelectedCcBillId}>
+                  <Select value={selectedCcBillId} onValueChange={(value) => setSelectedCcBillId(value ?? "")}>
                     <SelectTrigger className="h-8 text-xs" disabled={!ccCardId}>
                       <SelectValue placeholder="Link billing cycle">
                         {availableCycles.find((bill) => bill.id === selectedCcBillId)?.cycleName}
@@ -321,7 +321,7 @@ function Step1Upload({
                 <div className="space-y-3 rounded-lg border bg-gradient-to-b from-background to-muted/20 p-3">
                   <p className="text-[11px] font-semibold text-foreground">Non-CC Flow</p>
                   <p className="text-[10px] text-muted-foreground -mt-2">Choose one bank. All debit/UPI sources for it are included.</p>
-                  <Select value={nonCcBankId} onValueChange={setNonCcBankId}>
+                  <Select value={nonCcBankId} onValueChange={(value) => setNonCcBankId(value ?? "")}>
                     <SelectTrigger className="h-8 text-xs">
                       <SelectValue placeholder="Select bank">
                         {selectedNonCcBank?.name}
@@ -923,7 +923,7 @@ function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNe
           <div className="space-y-3 py-1">
             <div>
               <p className="text-xs font-medium mb-1">Credit Card</p>
-              <Select value={newBillCardId} onValueChange={setNewBillCardId}>
+                <Select value={newBillCardId} onValueChange={(value) => setNewBillCardId(value ?? "")}>
                 <SelectTrigger className="h-9 text-xs">
                   <SelectValue placeholder="Select credit card">
                     {creditCards.find((card) => card.id === newBillCardId)?.bankName} {creditCards.find((card) => card.id === newBillCardId)?.nickname ? `· ${creditCards.find((card) => card.id === newBillCardId)?.nickname}` : ""}
