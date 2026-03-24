@@ -26,6 +26,26 @@ function formatINR(n: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Math.abs(n));
 }
 
+function isNarrationUnclearForPurpose(narration: string) {
+  const text = narration.toLowerCase().trim();
+  if (!text) return true;
+
+  const merchantSignals = [
+    "uber", "ola", "rapido", "metro", "bus", "cab", "auto", "taxi", "irctc",
+    "swiggy", "zomato", "blinkit", "zepto", "amazon", "flipkart", "myntra",
+  ];
+
+  if (merchantSignals.some((token) => text.includes(token))) return false;
+
+  // Treat narration as unclear if it mostly contains rails/ID tokens and lacks merchant meaning.
+  const genericRailPattern = /\b(upi|trf|transfer|txn|ref|utr|vpa|pay|payment|collect|dr|debit|imps|neft|rtgs)\b/g;
+  const genericMatches = text.match(genericRailPattern) ?? [];
+  const alphaTokens = text.split(/[^a-z]+/).filter(Boolean);
+
+  if (alphaTokens.length <= 2) return true;
+  return genericMatches.length >= Math.ceil(alphaTokens.length / 2);
+}
+
 // ─── Step indicator ──────────────────────────────────────────────────────────
 
 const STEPS = [
@@ -999,6 +1019,7 @@ export default function ImportPage() {
   const [classifyTotal, setClassifyTotal] = useState(0);
   const [classifyLabel, setClassifyLabel] = useState("");
   const [selectedMetaIds, setSelectedMetaIds] = useState<string[]>([]);
+  const transportMetaSelected = selectedMetaIds.includes("transport_upi_150_250");
 
   const [saved, setSaved] = useState(false);
 
@@ -1084,17 +1105,47 @@ export default function ImportPage() {
 
         const isDebit = row.withdrawal != null;
         const amt = isDebit ? -(row.withdrawal ?? 0) : (row.deposit ?? 0);
+        const amountAbs = Math.abs(amt);
+        const narration = row.narration ?? "";
+        const narrationLower = narration.toLowerCase();
+        const hasUpiSignal =
+          inferredPayment.includes("upi") ||
+          /\bupi\b/.test(narrationLower) ||
+          /@[a-z]/.test(narrationLower);
+        const lowSignalCategory = !cls?.category || cls.category === "Other";
+        const shouldForceTransport =
+          transportMetaSelected &&
+          isDebit &&
+          amountAbs >= 150 &&
+          amountAbs <= 250 &&
+          hasUpiSignal &&
+          isNarrationUnclearForPurpose(narration) &&
+          lowSignalCategory;
+
+        const finalCategory = shouldForceTransport
+          ? "Transport"
+          : (cls?.category as Category ?? "Other");
+        const finalType = shouldForceTransport
+          ? "spend"
+          : (cls?.transactionType ?? (isDebit ? "spend" : "income"));
+        const finalPaymentMethod = shouldForceTransport
+          ? "UPI"
+          : (cls?.paymentMethod ?? "Other");
+        const finalConfidence = shouldForceTransport
+          ? Math.max(cls?.confidence ?? 0, 0.8)
+          : cls?.confidence;
+
         return {
           id: `${row.refNo || idx}-${Date.now()}`,
           refNo: row.refNo,
           date: row.date,
           narration: row.narration,
           amount: amt,
-          category: cls?.category as Category ?? "Other",
-          paymentMethod: (cls?.paymentMethod ?? "Other") as PaymentMethod,
-          transactionType: (cls?.transactionType ?? (isDebit ? "spend" : "income")) as Transaction["transactionType"],
-          confidence: cls?.confidence,
-          annotated: (cls?.confidence ?? 0) >= 0.75,
+          category: finalCategory as Category,
+          paymentMethod: finalPaymentMethod as PaymentMethod,
+          transactionType: finalType as Transaction["transactionType"],
+          confidence: finalConfidence,
+          annotated: (finalConfidence ?? 0) >= 0.75,
           splitStatus: "none",
           bankId: sourceBankId,
           cardId: source?.statementType === "bank_account" ? aiCardId : source?.cardId,

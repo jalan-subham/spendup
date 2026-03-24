@@ -16,6 +16,11 @@ export interface ClassifiedRow {
 const BASE_SYSTEM_PROMPT = `You are classifying Indian bank transactions. 
 Given a list of transactions (narration + debit/credit amount in INR), classify each one.
 
+Decision priority (highest first):
+1) Explicit hard rules in this prompt
+2) Additional user-selected classification metas
+3) General narration heuristics
+
 Transaction types:
 - spend        → actual purchase or expense
 - income       → salary, freelance pay, grants, receiving money from others
@@ -27,6 +32,10 @@ Transaction types:
 Categories (only for spend):
 Food, Transport, Shopping, Utilities, Entertainment, Travel, Health, Fuel, Rent, Education, Subscription, Groceries, Other
 
+Transport hard rule:
+- For debit/outgoing transactions with UPI payment pattern and amount between INR 150 and INR 250 (inclusive), if narration/purpose is unclear or generic, prefer transactionType="spend" and category="Transport".
+- Do not default these cases to "Other" unless there is clear conflicting evidence.
+
 For income/investment/transfer/cc_settlement/refund, return category as the type name with title case (e.g. "Income", "Investment", "Transfer", "CC Settlement", "Refund").
 Extract the payment method from the narration if possible (e.g. "UPI-...", "POS...", "NEFT", "IMPS"). Default to "Other" if unclear.
 
@@ -34,11 +43,11 @@ Return a JSON array only. No markdown, no explanation. Each element:
 { "refNo": string, "transactionType": string, "category": string, "paymentMethod": "UPI" | "Debit" | "Credit Card" | "Net Banking" | "Other", "confidence": number (0-1), "notes": string (brief reason if confidence < 0.8) }`;
 
 export async function classifyTransactions(rows: HdfcRawRow[], metaHints: string[] = []): Promise<ClassifiedRow[]> {
-  const BATCH_SIZE = 25;
+  const BATCH_SIZE = 12;
   const results: ClassifiedRow[] = [];
 
   const metaSection = metaHints.length
-    ? `\n\nAdditional user-selected classification metas (high-priority heuristics):\n- ${metaHints.join("\n- ")}`
+    ? `\n\nAdditional user-selected classification metas (treat as strong guidance and apply unless clearly contradicted):\n- ${metaHints.join("\n- ")}`
     : "";
 
   const systemPrompt = `${BASE_SYSTEM_PROMPT}${metaSection}`;
