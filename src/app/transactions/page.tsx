@@ -2,20 +2,21 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAccounts } from "@/lib/store";
-import { parseHdfcText } from "@/lib/parsers/hdfc-text";
 import type { HdfcRawRow, HdfcStatementMeta } from "@/lib/parsers/hdfc-text";
 import type { Transaction, StatementSource, StatementType, Category, PaymentMethod } from "@/lib/types";
 import { CATEGORIES } from "@/lib/types";
+import { PARSER_CATALOG, type ParserId } from "@/lib/parsers/catalog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   FileUp, CheckCircle2, Loader2, AlertTriangle, ArrowUpRight, ArrowDownRight,
   Scissors, Building2, ChevronRight, Search, RefreshCw,
-  Info, AlertCircle,
+  Info, AlertCircle, Lock, CreditCard, Landmark
 } from "lucide-react";
 import Link from "next/link";
 
@@ -23,12 +24,6 @@ import Link from "next/link";
 
 function formatINR(n: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Math.abs(n));
-}
-
-function parseDateDDMMYY(s: string): string {
-  // DD/MM/YY → YYYY-MM-DD
-  const [d, m, y] = s.split("/");
-  return `20${y}-${m}-${d}`;
 }
 
 // ─── Step indicator ──────────────────────────────────────────────────────────
@@ -61,52 +56,172 @@ function StepBar({ current }: { current: number }) {
 
 // ─── Step 1: Upload ──────────────────────────────────────────────────────────
 
+type BillLite = {
+  id: string;
+  cardId: string;
+  cycleName: string;
+  transactions?: Array<{ statementType?: string | null }>;
+};
+
 function Step1Upload({
-  banks, sources, setSources, onParsed,
+  banks,
+  bills,
+  sources,
+  setSources,
+  parserId,
+  setParserId,
+  uploadKind,
+  setUploadKind,
+  selectedCcBillId,
+  setSelectedCcBillId,
+  onParsed,
 }: {
   banks: ReturnType<typeof useAccounts>["banks"];
+  bills: BillLite[];
   sources: StatementSource[];
   setSources: (s: StatementSource[]) => void;
+  parserId: ParserId | "";
+  setParserId: (id: ParserId) => void;
+  uploadKind: "" | "cc" | "non_cc";
+  setUploadKind: (k: "" | "cc" | "non_cc") => void;
+  selectedCcBillId: string;
+  setSelectedCcBillId: (id: string) => void;
   onParsed: (meta: HdfcStatementMeta, rows: HdfcRawRow[], fileName: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleFile = useCallback(async (file: File) => {
+  const [ccBankId, setCcBankId] = useState("");
+  const [ccCardId, setCcCardId] = useState("");
+  const [nonCcBankId, setNonCcBankId] = useState("");
+
+  const [password, setPassword] = useState("");
+  const [requiresPassword, setRequiresPassword] = useState(false);
+  const [currentFile, setCurrentFile] = useState<File | null>(null);
+
+  const selectedNonCcBank = banks.find((bank) => bank.id === nonCcBankId);
+  const selectedCcBank = banks.find((bank) => bank.id === ccBankId);
+  const ccCards = (selectedCcBank?.cards ?? []).filter((card) => card.type === "credit");
+  const nonCcCards = (selectedNonCcBank?.cards ?? []).filter((card) => card.type !== "credit");
+
+  const billsForCard = bills.filter((bill) => bill.cardId === ccCardId);
+  const availableCycles = billsForCard.filter(
+    (bill) => !(bill.transactions ?? []).some((tx) => tx.statementType === "credit_card")
+  );
+
+  useEffect(() => {
+    setSources([]);
+    setSelectedCcBillId("");
+    setError("");
+  }, [uploadKind, setSelectedCcBillId, setSources]);
+
+  useEffect(() => {
+    if (uploadKind !== "cc") return;
+    if (!ccBankId || !ccCardId) {
+      setSources([]);
+      return;
+    }
+    setSources([{ bankId: ccBankId, cardId: ccCardId, statementType: "credit_card" }]);
+  }, [uploadKind, ccBankId, ccCardId, setSources]);
+
+  useEffect(() => {
+    if (uploadKind !== "non_cc") return;
+    if (!nonCcBankId) {
+      setSources([]);
+      return;
+    }
+    const bank = banks.find((b) => b.id === nonCcBankId);
+    if (!bank) {
+      setSources([]);
+      return;
+    }
+    const mapped = bank.cards
+      .filter((card) => card.type !== "credit")
+      .map((card) => ({ bankId: bank.id, cardId: card.id, statementType: "bank_account" as StatementType }));
+    setSources(mapped);
+  }, [uploadKind, nonCcBankId, banks, setSources]);
+
+  // Clear stale validation/parsing errors when parser changes.
+  useEffect(() => {
+    setError("");
+    setRequiresPassword(false);
+    setCurrentFile(null);
+    setPassword("");
+  }, [parserId]);
+
+  const handleFile = useCallback(async (file: File, pass?: string) => {
+    if (!parserId) {
+      setError("Select a parser before uploading a statement.");
+      return;
+    }
+
+    if (!uploadKind) {
+      setError("Select what you want to upload first: CC statement or non-CC bank statement.");
+      return;
+    }
+
+    if (uploadKind === "cc" && !selectedCcBillId) {
+      setError("Select a billing cycle before uploading a CC statement.");
+      return;
+    }
+
+    if (uploadKind === "non_cc" && sources.length === 0) {
+      setError("Select a bank with at least one non-CC source before uploading.");
+      return;
+    }
+
     setError("");
     setLoading(true);
     try {
-      const text = await file.text();
-      const { meta, rows } = parseHdfcText(text);
-      if (!rows.length) throw new Error("No transactions found. Is this an HDFC text statement?");
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("parserId", parserId);
+      if (pass) formData.append("password", pass);
+
+      const res = await fetch("/api/upload-statement", { method: "POST", body: formData });
+      const result = await res.json();
+
+      if (!res.ok) {
+        if (res.status === 401 && result.passwordRequired) {
+          setRequiresPassword(true);
+          setCurrentFile(file);
+          throw new Error("This statement is password protected. Enter password to continue.");
+        }
+        throw new Error(result.error || "Failed to parse statement");
+      }
+
+      const rows = (result.rows || []) as HdfcRawRow[];
+      const meta = result.meta as HdfcStatementMeta | undefined;
+      if (!rows.length) throw new Error("No transactions found for selected parser.");
+      if (!meta) throw new Error("Parser did not return statement metadata.");
+
       onParsed(meta, rows, file.name);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Parse failed");
     } finally {
       setLoading(false);
     }
-  }, [onParsed]);
+  }, [onParsed, parserId, selectedCcBillId, sources.length, uploadKind]);
 
-  const toggleCard = (bankId: string, cardId: string) => {
-    const ex = sources.find(s => s.bankId === bankId && s.cardId === cardId);
-    if (ex) setSources(sources.filter(s => !(s.bankId === bankId && s.cardId === cardId)));
-    else setSources([...sources, { bankId, cardId, statementType: "bank_account" }]);
-  };
+  const canSelectFile =
+    !!parserId &&
+    !!uploadKind &&
+    sources.length > 0 &&
+    (uploadKind !== "cc" || !!selectedCcBillId);
 
-  const setType = (bankId: string, cardId: string, t: StatementType) =>
-    setSources(sources.map(s => s.bankId === bankId && s.cardId === cardId ? { ...s, statementType: t } : s));
+  const activeParser = PARSER_CATALOG.find((parser) => parser.id === parserId);
 
   return (
-    <div className="grid gap-5 lg:grid-cols-3">
+    <div className="grid gap-5 lg:grid-cols-5">
       {/* Source selection */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold">1a · Which accounts?</CardTitle>
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold">1 · Import Type & Source</CardTitle>
           <CardDescription className="text-xs space-y-1">
-            <p>Select which cards are covered by this file.</p>
-            <p className="text-[10px] text-muted-foreground/80 bg-muted/40 p-1.5 rounded border border-border/50">
-              <strong>Tip:</strong> Select <strong>CC Stmt</strong> if this is a credit card bill (contains actual CC spends). Select <strong>Bank Stmt</strong> for bank accounts (contains CC Settlements / bill payments).
+            <p>Start by selecting what you are uploading, then map it correctly.</p>
+            <p className="text-[10px] text-muted-foreground/90 bg-muted/50 p-1.5 rounded border border-border/50">
+              <strong>Rule:</strong> One billing cycle maps to one CC statement import.
             </p>
           </CardDescription>
         </CardHeader>
@@ -119,79 +234,226 @@ function Step1Upload({
             </div>
           ) : (
             <div className="space-y-4">
-              {banks.map(bank => (
-                <div key={bank.id}>
-                  <p className="text-xs font-semibold mb-1.5 flex items-center gap-2">
-                    <span className="h-4 w-4 rounded-full inline-flex items-center justify-center text-white text-[9px] font-bold" style={{ backgroundColor: bank.color }}>{bank.name[0]}</span>
-                    {bank.name}
-                  </p>
-                  <div className="space-y-1 ml-6">
-                    {bank.cards.map(card => {
-                      const sel = sources.find(s => s.bankId === bank.id && s.cardId === card.id);
-                      return (
-                        <div key={card.id}>
-                          <label className="flex items-center gap-2 text-xs cursor-pointer">
-                            <input type="checkbox" checked={!!sel} onChange={() => toggleCard(bank.id, card.id)} className="rounded" />
-                            <span className="font-medium">{card.nickname}</span>
-                            {card.last4 && <span className="text-muted-foreground font-mono">•{card.last4}</span>}
-                          </label>
-                          {sel && (
-                            <div className="ml-5 mt-1 flex gap-1.5">
-                              {(["bank_account", "credit_card"] as StatementType[]).map(t => (
-                                <button key={t} onClick={() => setType(bank.id, card.id, t)}
-                                  className={`text-[10px] px-2 py-0.5 rounded-full border font-medium transition-colors ${sel.statementType === t ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
-                                  {t === "bank_account" ? "Bank Stmt" : "CC Stmt"}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={uploadKind === "cc" ? "default" : "outline"}
+                  className="h-10 text-xs gap-1.5"
+                  onClick={() => {
+                    setUploadKind("cc");
+                    setNonCcBankId("");
+                  }}
+                >
+                  <CreditCard className="h-3.5 w-3.5" />
+                  CC Statement
+                </Button>
+                <Button
+                  type="button"
+                  variant={uploadKind === "non_cc" ? "default" : "outline"}
+                  className="h-10 text-xs gap-1.5"
+                  onClick={() => {
+                    setUploadKind("non_cc");
+                    setCcBankId("");
+                    setCcCardId("");
+                  }}
+                >
+                  <Landmark className="h-3.5 w-3.5" />
+                  Non-CC Bank Statement
+                </Button>
+              </div>
+
+              {uploadKind === "cc" && (
+                <div className="space-y-3 rounded-lg border bg-gradient-to-b from-background to-muted/20 p-3">
+                  <p className="text-[11px] font-semibold text-foreground">CC Flow</p>
+                  <p className="text-[10px] text-muted-foreground -mt-2">Select bank, credit card, then billing cycle.</p>
+                  <Select value={ccBankId} onValueChange={(value) => { setCcBankId(value); setCcCardId(""); setSelectedCcBillId(""); }}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select bank">
+                        {selectedCcBank?.name}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {banks.filter((bank) => bank.cards.some((card) => card.type === "credit")).map((bank) => (
+                        <SelectItem key={bank.id} value={bank.id} className="text-xs">{bank.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={ccCardId} onValueChange={(value) => { setCcCardId(value); setSelectedCcBillId(""); }}>
+                    <SelectTrigger className="h-8 text-xs" disabled={!ccBankId}>
+                      <SelectValue placeholder="Select credit card">
+                        {ccCards.find((card) => card.id === ccCardId)?.nickname}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ccCards.map((card) => (
+                        <SelectItem key={card.id} value={card.id} className="text-xs">
+                          {card.nickname} {card.last4 ? `(•${card.last4})` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={selectedCcBillId} onValueChange={setSelectedCcBillId}>
+                    <SelectTrigger className="h-8 text-xs" disabled={!ccCardId}>
+                      <SelectValue placeholder="Link billing cycle">
+                        {availableCycles.find((bill) => bill.id === selectedCcBillId)?.cycleName}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableCycles.map((bill) => (
+                        <SelectItem key={bill.id} value={bill.id} className="text-xs">
+                          {bill.cycleName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {ccCardId && availableCycles.length === 0 && (
+                    <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      No free billing cycle found for this card. Create a new cycle in Bills and retry.
+                    </p>
+                  )}
                 </div>
-              ))}
+              )}
+
+              {uploadKind === "non_cc" && (
+                <div className="space-y-3 rounded-lg border bg-gradient-to-b from-background to-muted/20 p-3">
+                  <p className="text-[11px] font-semibold text-foreground">Non-CC Flow</p>
+                  <p className="text-[10px] text-muted-foreground -mt-2">Choose one bank. All debit/UPI sources for it are included.</p>
+                  <Select value={nonCcBankId} onValueChange={setNonCcBankId}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select bank">
+                        {selectedNonCcBank?.name}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {banks.filter((bank) => bank.cards.some((card) => card.type !== "credit")).map((bank) => (
+                        <SelectItem key={bank.id} value={bank.id} className="text-xs">{bank.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {nonCcBankId && (
+                    <div className="rounded-lg bg-muted/40 p-2.5 border">
+                      <p className="text-[10px] font-semibold text-muted-foreground mb-1">Included sources</p>
+                      {nonCcCards.length === 0 ? (
+                        <p className="text-[10px] text-amber-600">No non-CC sources configured for this bank.</p>
+                      ) : (
+                        nonCcCards.map((card) => (
+                          <p key={card.id} className="text-[10px] text-muted-foreground leading-5">
+                            {card.nickname} {card.last4 ? `•${card.last4}` : ""}
+                          </p>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
 
       {/* File upload */}
-      <Card className="lg:col-span-2 border-dashed border-2 hover:bg-muted/30 transition-colors cursor-pointer"
-        onClick={() => inputRef.current?.click()}>
-        <CardContent className="flex flex-col items-center justify-center h-full min-h-[240px] text-center p-8">
-          <input ref={inputRef} type="file" accept=".txt,.text" className="hidden"
-            onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
-          {loading ? (
-            <div className="space-y-3">
-              <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-              <p className="text-sm font-medium">Parsing statement…</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="mx-auto h-12 w-12 rounded-xl bg-primary/8 border border-primary/20 flex items-center justify-center">
-                <FileUp className="h-5 w-5 text-primary" />
+      <Card className="lg:col-span-3 border-dashed border-2 hover:bg-muted/20 transition-colors"
+        onClick={() => !requiresPassword && canSelectFile && inputRef.current?.click()}>
+        <CardContent className="p-6 md:p-8">
+          <div className="grid gap-6 md:grid-cols-[1.1fr_0.9fr] items-start">
+            <div className="space-y-4">
+              <div className="w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                <p className="text-left text-xs font-semibold text-muted-foreground mb-1">Parser</p>
+                <Select value={parserId} onValueChange={(v) => v && setParserId(v as ParserId)}>
+                  <SelectTrigger className="h-9 text-xs bg-background">
+                    <SelectValue placeholder="Choose parser">
+                      {activeParser?.label}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PARSER_CATALOG.map((parser) => (
+                      <SelectItem key={parser.id} value={parser.id} className="text-xs">
+                        {parser.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {activeParser && (
+                  <p className="text-[10px] text-muted-foreground mt-1.5 text-left">
+                    Selected: <span className="font-medium text-foreground">{activeParser.label}</span> · Supports {activeParser.supportedExtensions.join(", ")}
+                  </p>
+                )}
               </div>
-              <div>
-                <p className="text-sm font-semibold">Drop HDFC text statement here</p>
-                <p className="text-xs text-muted-foreground mt-1">or click to browse · .txt files only</p>
-              </div>
-              {sources.length > 0 && (
-                <div className="mt-2 rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-left inline-block">
-                  <p className="text-[10px] font-semibold text-primary mb-1">Tagged as:</p>
-                  {sources.map((s, i) => {
-                    const b = banks.find(b => b.id === s.bankId);
-                    const c = b?.cards.find(c => c.id === s.cardId);
-                    return <p key={i} className="text-[10px] text-muted-foreground">{b?.name} · {c?.nickname} ({s.statementType === "bank_account" ? "Bank" : "CC"})</p>;
-                  })}
+
+              {requiresPassword ? (
+                <div className="space-y-4 w-full max-w-sm animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                  <div className="bg-amber-50 dark:bg-amber-950/40 p-5 rounded-xl border border-amber-200 text-left">
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-400 flex items-center gap-2 mb-3">
+                      <Lock className="w-4 h-4" /> Password Required
+                    </p>
+                    <Input type="password" placeholder="e.g. SUBH0710" value={password} onChange={e => setPassword(e.target.value)} className="bg-white dark:bg-black" />
+                    <Button className="w-full mt-4" onClick={() => handleFile(currentFile!, password)}>Unlock & Parse PDF</Button>
+                    <Button variant="ghost" className="w-full mt-1 text-xs" onClick={() => { setRequiresPassword(false); setCurrentFile(null); }}>Cancel</Button>
+                  </div>
+                  {error && <p className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="h-3 w-3" />{error}</p>}
+                </div>
+              ) : (
+                <div className="rounded-xl border bg-background p-5 text-left">
+                  <p className="text-xs font-semibold text-foreground mb-2">Ready-To-Import Summary</p>
+                  <p className="text-[11px] text-muted-foreground">Flow: <span className="text-foreground font-medium">{uploadKind === "cc" ? "CC Statement" : uploadKind === "non_cc" ? "Non-CC Bank Statement" : "Not selected"}</span></p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Sources: <span className="text-foreground font-medium">{sources.length}</span></p>
+                  {uploadKind === "cc" && (
+                    <p className="text-[11px] text-muted-foreground mt-1">Billing cycle: <span className="text-foreground font-medium">{selectedCcBillId ? (availableCycles.find((bill) => bill.id === selectedCcBillId)?.cycleName || "Linked") : "Not selected"}</span></p>
+                  )}
+                  {sources.length > 0 && (
+                    <div className="mt-2 pt-2 border-t space-y-1">
+                      {sources.map((s, i) => {
+                        const b = banks.find((bank) => bank.id === s.bankId);
+                        const c = b?.cards.find((card) => card.id === s.cardId);
+                        return (
+                          <p key={i} className="text-[10px] text-muted-foreground leading-5">
+                            {b?.name} · {c?.nickname} ({s.statementType === "bank_account" ? "Bank" : "CC"})
+                          </p>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
-              {error && <p className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="h-3 w-3" />{error}</p>}
-              <Button size="sm" onClick={e => { e.stopPropagation(); inputRef.current?.click(); }} disabled={sources.length === 0}>
-                {sources.length === 0 ? "Select sources first" : "Select File"}
-              </Button>
             </div>
-          )}
+
+            <div className="rounded-2xl border border-dashed bg-muted/20 p-6 md:p-8 text-center flex flex-col items-center justify-center min-h-[300px] cursor-pointer"
+              onClick={() => !requiresPassword && canSelectFile && inputRef.current?.click()}>
+              <input ref={inputRef} type="file" accept=".txt,.text,.pdf" className="hidden"
+                onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
+              {loading ? (
+                <div className="space-y-3">
+                  <Loader2 className="h-9 w-9 animate-spin mx-auto text-primary" />
+                  <p className="text-sm font-medium">Parsing statement…</p>
+                </div>
+              ) : (
+                <>
+                  <div className="mx-auto h-12 w-12 rounded-xl bg-primary/8 border border-primary/20 flex items-center justify-center">
+                    <FileUp className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="mt-3">
+                    <p className="text-base font-semibold">Drop statement file here</p>
+                    <p className="text-xs text-muted-foreground mt-1">Parser and source mapping are now selected on the left.</p>
+                  </div>
+                  <Button size="sm" className="mt-4" onClick={e => {
+                    e.stopPropagation();
+                    if (inputRef.current) {
+                      // Allow selecting the same file again after a failed attempt.
+                      inputRef.current.value = "";
+                      inputRef.current.click();
+                    }
+                  }} disabled={!canSelectFile}>
+                    {!uploadKind ? "Select upload type first" : sources.length === 0 ? "Select sources first" : !parserId ? "Select parser first" : uploadKind === "cc" && !selectedCcBillId ? "Select billing cycle" : "Select File"}
+                  </Button>
+                  {error && <p className="text-xs text-destructive mt-2 flex items-center gap-1"><AlertCircle className="h-3 w-3" />{error}</p>}
+                </>
+              )}
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>
@@ -200,10 +462,20 @@ function Step1Upload({
 
 // ─── Step 2: Validate metadata ───────────────────────────────────────────────
 
-function Step2Validate({ meta, rowCount, duplicates, onConfirm }: {
+const CLASSIFICATION_METAS = [
+  {
+    id: "transport_upi_150_250",
+    label: "Transport Meta",
+    hint: "UPI transactions in the INR 150-250 range with unclear narration/purpose are likely Transport.",
+  },
+] as const;
+
+function Step2Validate({ meta, rowCount, duplicates, selectedMetaIds, onToggleMeta, onConfirm }: {
   meta: HdfcStatementMeta;
   rowCount: number;
   duplicates: string[];
+  selectedMetaIds: string[];
+  onToggleMeta: (metaId: string) => void;
   onConfirm: () => void;
 }) {
   const expectedTotal = meta.drCount + meta.crCount;
@@ -268,6 +540,29 @@ function Step2Validate({ meta, rowCount, duplicates, onConfirm }: {
             </div>
           )}
 
+          <div className="rounded-lg border bg-muted/25 p-3 mb-4">
+            <p className="text-xs font-semibold mb-2">Classification Metas (optional)</p>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              Selected metas are injected into the AI classifier prompt for this import.
+            </p>
+            <div className="space-y-2">
+              {CLASSIFICATION_METAS.map((metaItem) => {
+                const selected = selectedMetaIds.includes(metaItem.id);
+                return (
+                  <button
+                    key={metaItem.id}
+                    type="button"
+                    onClick={() => onToggleMeta(metaItem.id)}
+                    className={`w-full text-left rounded-md border px-3 py-2 transition-colors ${selected ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-muted/40"}`}
+                  >
+                    <p className="text-xs font-medium">{metaItem.label}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{metaItem.hint}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <Button onClick={onConfirm} className="gap-2">
             Looks good — Classify with AI <ChevronRight className="h-4 w-4" />
           </Button>
@@ -322,16 +617,75 @@ const TX_TYPE_LABELS: Record<string, string> = {
   refund_settlement: "Refund Settle",
 };
 
-function Step4Review({ transactions, bills, banks, onUpdate, onNext }: {
+function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNext }: {
   transactions: Transaction[];
   bills: any[];
   banks: ReturnType<typeof useAccounts>["banks"];
   onUpdate: (id: string, patch: Partial<Transaction>) => void;
+  onBillCreated: (bill: any) => void;
   onNext: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [filterAnnotated, setFilterAnnotated] = useState<string>("all");
+
+  const [isCreateBillDialogOpen, setIsCreateBillDialogOpen] = useState(false);
+  const [targetTxId, setTargetTxId] = useState<string>("");
+  const [newBillCardId, setNewBillCardId] = useState("");
+  const [newBillCycleName, setNewBillCycleName] = useState("");
+  const [newBillAmount, setNewBillAmount] = useState("");
+  const [newBillError, setNewBillError] = useState("");
+  const [isCreatingBill, setIsCreatingBill] = useState(false);
+
+  const creditCards = banks
+    .flatMap((b) => b.cards.filter((c) => c.type === "credit").map((c) => ({ ...c, bankName: b.name })))
+    .sort((a, b) => `${a.bankName}-${a.nickname}`.localeCompare(`${b.bankName}-${b.nickname}`));
+
+  const openCreateBillDialog = (tx: Transaction) => {
+    setTargetTxId(tx.id);
+    setNewBillCardId(tx.cardId ?? "");
+    setNewBillCycleName("");
+    setNewBillAmount(Math.abs(tx.amount).toString());
+    setNewBillError("");
+    setIsCreateBillDialogOpen(true);
+  };
+
+  const createBillFromClassification = async () => {
+    if (!newBillCardId || !newBillCycleName || !newBillAmount) {
+      setNewBillError("Credit card, cycle name, and bill amount are required.");
+      return;
+    }
+
+    setNewBillError("");
+    setIsCreatingBill(true);
+    try {
+      const res = await fetch("/api/bills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cardId: newBillCardId,
+          cycleName: newBillCycleName,
+          billAmount: parseFloat(newBillAmount) || 0,
+        }),
+      });
+
+      const bill = await res.json();
+      if (!res.ok) {
+        setNewBillError(bill.error || "Failed to create billing cycle.");
+        return;
+      }
+
+      onBillCreated(bill);
+      if (targetTxId) {
+        onUpdate(targetTxId, { linkedBillId: bill.id, annotated: true });
+      }
+      setIsCreateBillDialogOpen(false);
+    } catch {
+      setNewBillError("An unexpected error occurred while creating the billing cycle.");
+    } finally {
+      setIsCreatingBill(false);
+    }
+  };
 
   const unannotated = transactions.filter(t => !t.annotated).length;
   const lowConf = transactions.filter(t => (t.confidence ?? 1) < 0.75 && !t.annotated).length;
@@ -444,17 +798,29 @@ function Step4Review({ transactions, bills, banks, onUpdate, onNext }: {
                       {tx.refNo && <p className="text-[10px] text-muted-foreground font-mono">{tx.refNo}</p>}
                     </TableCell>
                     <TableCell>
-                      <Select value={tx.cardId ?? "none"} onValueChange={v => v && onUpdate(tx.id, { cardId: v === "none" ? undefined : v, annotated: true })}>
-                        <SelectTrigger className="h-7 w-24 text-[10px] border-none shadow-none bg-muted/40 hover:bg-muted">
-                          <SelectValue placeholder="Source" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none" className="text-[10px]">Unknown Source</SelectItem>
-                          {banks.find(b => b.id === tx.bankId)?.cards.map(c => (
-                            <SelectItem key={c.id} value={c.id} className="text-[10px]">{c.nickname}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {tx.statementType === "credit_card" ? (
+                        <div className="h-7 px-2 py-1 flex items-center text-[10px] font-medium text-muted-foreground bg-muted/40 rounded border border-transparent whitespace-nowrap">
+                          {banks.find(b => b.id === tx.bankId)?.cards.find(c => c.id === tx.cardId)?.nickname || "Credit Card"}
+                        </div>
+                      ) : (
+                        <Select value={tx.cardId ?? "none"} onValueChange={v => v && onUpdate(tx.id, { cardId: v === "none" ? undefined : v, annotated: true })}>
+                          <SelectTrigger className="h-7 w-24 text-[10px] border-none shadow-none bg-muted/40 hover:bg-muted">
+                            <SelectValue>
+                              {tx.cardId && tx.cardId !== "none" 
+                                ? banks.find(b => b.id === tx.bankId)?.cards.find(c => c.id === tx.cardId)?.nickname || "Unknown"
+                                : "Unknown Source"}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none" className="text-[10px]">Unknown Source</SelectItem>
+                            {banks.find(b => b.id === tx.bankId)?.cards.filter(c => c.type !== "credit").map(c => (
+                              <SelectItem key={c.id} value={c.id} className="text-[10px]">
+                                {c.nickname} {c.last4 && `(•${c.last4})`}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
@@ -467,17 +833,29 @@ function Step4Review({ transactions, bills, banks, onUpdate, onNext }: {
                           </SelectContent>
                         </Select>
                         {tx.transactionType === "cc_settlement" && (
-                          <Select value={(tx.linkedBillId || "none") as string} onValueChange={v => onUpdate(tx.id, { linkedBillId: v === "none" ? undefined : v, annotated: true })}>
-                            <SelectTrigger className="h-6 w-28 text-[9px] bg-amber-50 text-amber-900 border-amber-200">
-                              <SelectValue placeholder="Link Bill..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none" className="text-[9px]">Not linked</SelectItem>
-                              {bills.map(b => (
-                                <SelectItem key={b.id} value={b.id} className="text-[9px]">{b.cycleName}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <div className="flex items-center gap-1.5">
+                            <Select value={(tx.linkedBillId || "none") as string} onValueChange={v => v && onUpdate(tx.id, { linkedBillId: v === "none" ? undefined : v, annotated: true })}>
+                              <SelectTrigger className="h-6 w-28 text-[9px] bg-amber-50 text-amber-900 border-amber-200">
+                                <SelectValue placeholder="Link Bill...">
+                                  {tx.linkedBillId ? bills.find((b) => b.id === tx.linkedBillId)?.cycleName : "Not linked"}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none" className="text-[9px]">Not linked</SelectItem>
+                                {bills.map(b => (
+                                  <SelectItem key={b.id} value={b.id} className="text-[9px]">{b.cycleName}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 px-2 text-[9px]"
+                              onClick={() => openCreateBillDialog(tx)}
+                            >
+                              + Cycle
+                            </Button>
+                          </div>
                         )}
                       </div>
                     </TableCell>
@@ -533,6 +911,67 @@ function Step4Review({ transactions, bills, banks, onUpdate, onNext }: {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={isCreateBillDialogOpen} onOpenChange={setIsCreateBillDialogOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Create Billing Cycle</DialogTitle>
+            <DialogDescription>
+              Create and immediately link a billing cycle for this CC settlement transaction.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div>
+              <p className="text-xs font-medium mb-1">Credit Card</p>
+              <Select value={newBillCardId} onValueChange={setNewBillCardId}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Select credit card">
+                    {creditCards.find((card) => card.id === newBillCardId)?.bankName} {creditCards.find((card) => card.id === newBillCardId)?.nickname ? `· ${creditCards.find((card) => card.id === newBillCardId)?.nickname}` : ""}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {creditCards.map((card) => (
+                    <SelectItem key={card.id} value={card.id} className="text-xs">
+                      {card.bankName} · {card.nickname} {card.last4 ? `(•${card.last4})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium mb-1">Cycle Name</p>
+              <Input
+                placeholder="e.g. Mar 2026"
+                value={newBillCycleName}
+                onChange={(e) => setNewBillCycleName(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+
+            <div>
+              <p className="text-xs font-medium mb-1">Bill Amount</p>
+              <Input
+                type="number"
+                placeholder="25000"
+                value={newBillAmount}
+                onChange={(e) => setNewBillAmount(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+
+            {newBillError && (
+              <p className="text-xs text-destructive">{newBillError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateBillDialogOpen(false)}>Cancel</Button>
+            <Button onClick={createBillFromClassification} disabled={isCreatingBill}>
+              {isCreatingBill ? "Creating..." : "Create & Link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -544,6 +983,9 @@ export default function ImportPage() {
   const { banks, loaded } = useAccounts();
   const [step, setStep] = useState(1);
   const [sources, setSources] = useState<StatementSource[]>([]);
+  const [parserId, setParserId] = useState<ParserId | "">("");
+  const [uploadKind, setUploadKind] = useState<"" | "cc" | "non_cc">("");
+  const [selectedCcBillId, setSelectedCcBillId] = useState("");
 
   // Parse results
   const [meta, setMeta] = useState<HdfcStatementMeta | null>(null);
@@ -556,6 +998,7 @@ export default function ImportPage() {
   const [classifyProgress, setClassifyProgress] = useState(0);
   const [classifyTotal, setClassifyTotal] = useState(0);
   const [classifyLabel, setClassifyLabel] = useState("");
+  const [selectedMetaIds, setSelectedMetaIds] = useState<string[]>([]);
 
   const [saved, setSaved] = useState(false);
 
@@ -600,12 +1043,16 @@ export default function ImportPage() {
     setClassifyLabel("Starting classification…");
 
     try {
+      const selectedMetaHints = CLASSIFICATION_METAS
+        .filter((metaItem) => selectedMetaIds.includes(metaItem.id))
+        .map((metaItem) => metaItem.hint);
+
       // Call API in a single request (batching is handled server-side)
       setClassifyLabel(`Sending ${deduped.length} rows to AI…`);
       const res = await fetch("/api/classify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: deduped }),
+        body: JSON.stringify({ rows: deduped, metaHints: selectedMetaHints }),
       });
       const data = await res.json();
       setClassifyProgress(deduped.length);
@@ -618,16 +1065,21 @@ export default function ImportPage() {
       const classMap = new Map(classified.map(c => [c.refNo, c]));
 
       const source = sources[0];
+      const sourceBankId = source?.bankId;
       const txs: Transaction[] = deduped.map((row, idx) => {
         const cls = classMap.get(row.refNo);
         const inferredPayment = (cls?.paymentMethod ?? "").toLowerCase();
-        const validCards = banks.find(b => b.id === source?.bankId)?.cards || [];
+        const validCards = banks.find(b => b.id === sourceBankId)?.cards || [];
         
-        let aiCardId = source?.cardId;
+        let aiCardId: string | undefined = source?.cardId;
         if (source?.statementType === "bank_account" && inferredPayment) {
-          // Attempt to find a card matching "upi" or "debit"
-          const match = validCards.find(c => c.type === inferredPayment.split(" ")[0] || c.nickname.toLowerCase().includes(inferredPayment));
+          // Attempt to find a non-CC card matching "upi" or "debit"
+          const match = validCards.find(c => c.type !== "credit" && (c.type === inferredPayment.split(" ")[0] || c.nickname.toLowerCase().includes(inferredPayment)));
           if (match) aiCardId = match.id;
+        }
+
+        if (source?.statementType === "bank_account" && !inferredPayment) {
+          aiCardId = undefined;
         }
 
         const isDebit = row.withdrawal != null;
@@ -644,9 +1096,10 @@ export default function ImportPage() {
           confidence: cls?.confidence,
           annotated: (cls?.confidence ?? 0) >= 0.75,
           splitStatus: "none",
-          bankId: source?.bankId,
-          cardId: source?.cardId,
+          bankId: sourceBankId,
+          cardId: source?.statementType === "bank_account" ? aiCardId : source?.cardId,
           statementType: source?.statementType,
+          linkedBillId: source?.statementType === "credit_card" ? (selectedCcBillId || undefined) : undefined,
           closingBalance: row.closingBalance,
         };
       });
@@ -675,14 +1128,33 @@ export default function ImportPage() {
     setRawRows([]);
     setTransactions([]);
     setSources([]);
+    setUploadKind("");
+    setSelectedCcBillId("");
+    setSelectedMetaIds([]);
     setClassifyProgress(0);
     setDuplicates([]);
+  };
+
+  const toggleMeta = (metaId: string) => {
+    setSelectedMetaIds((prev) =>
+      prev.includes(metaId) ? prev.filter((id) => id !== metaId) : [...prev, metaId]
+    );
   };
 
   const [bills, setBills] = useState<any[]>([]);
   useEffect(() => {
     fetch("/api/bills").then(r => r.json()).then(setBills).catch(() => {});
   }, []);
+
+  const handleBillCreated = (bill: any) => {
+    setBills((prev) => {
+      const exists = prev.some((existing) => existing.id === bill.id);
+      if (exists) {
+        return prev.map((existing) => (existing.id === bill.id ? { ...existing, ...bill } : existing));
+      }
+      return [bill, ...prev];
+    });
+  };
 
   if (!loaded) return null;
 
@@ -705,17 +1177,33 @@ export default function ImportPage() {
 
       <StepBar current={step} />
 
-      {step === 1 && <Step1Upload banks={banks} sources={sources} setSources={setSources} onParsed={handleParsed} />}
+      {step === 1 && (
+        <Step1Upload
+          banks={banks}
+          bills={bills}
+          sources={sources}
+          setSources={setSources}
+          parserId={parserId}
+          setParserId={setParserId}
+          uploadKind={uploadKind}
+          setUploadKind={setUploadKind}
+          selectedCcBillId={selectedCcBillId}
+          setSelectedCcBillId={setSelectedCcBillId}
+          onParsed={handleParsed}
+        />
+      )}
       {step === 2 && meta && (
         <Step2Validate
           meta={meta}
           rowCount={rawRows.filter(r => !duplicates.includes(r.refNo)).length}
           duplicates={duplicates}
+          selectedMetaIds={selectedMetaIds}
+          onToggleMeta={toggleMeta}
           onConfirm={handleValidated}
         />
       )}
       {step === 3 && <Step3Classify progress={classifyProgress} total={classifyTotal} current={classifyLabel} />}
-      {step === 4 && <Step4Review bills={bills} banks={banks} transactions={transactions} onUpdate={updateTx} onNext={handleConfirm} />}
+      {step === 4 && <Step4Review bills={bills} banks={banks} transactions={transactions} onUpdate={updateTx} onBillCreated={handleBillCreated} onNext={handleConfirm} />}
     </div>
   );
 }

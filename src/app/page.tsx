@@ -12,17 +12,37 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 const chartConfig = {
-  amount: { label: "₹ Spent", color: "hsl(var(--primary))" },
+  amount: {
+    label: "₹ Spent",
+    theme: {
+      light: "hsl(var(--chart-1))",
+      dark: "oklch(0.78 0.17 250)",
+    },
+  },
 } satisfies ChartConfig;
 
 function formatINR(amount: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Math.abs(amount));
 }
 
-function parseDDMMYY(s: string) {
+function parseTxnDate(s: string) {
   if (!s) return 0;
-  const [d, m, y] = s.split("/");
-  return new Date(2000 + parseInt(y), parseInt(m) - 1, parseInt(d)).getTime();
+  // Supports DD/MM/YY, DD/MM/YYYY, DD-MM-YYYY and ISO-like strings.
+  const slash = s.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);
+  if (slash) {
+    const [, d, m, yRaw] = slash;
+    const y = yRaw.length === 2 ? 2000 + parseInt(yRaw, 10) : parseInt(yRaw, 10);
+    return new Date(y, parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
+  }
+
+  const dash = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dash) {
+    const [, d, m, y] = dash;
+    return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
+  }
+
+  const isoTime = new Date(s).getTime();
+  return Number.isNaN(isoTime) ? 0 : isoTime;
 }
 
 export default function Home() {
@@ -88,11 +108,14 @@ export default function Home() {
     const topCategory = categoryData.length > 0 ? categoryData[0] : null;
 
     const areaData = Object.entries(dailyMap)
-      .sort((a, b) => parseDDMMYY(a[0]) - parseDDMMYY(b[0]))
+      .sort((a, b) => parseTxnDate(a[0]) - parseTxnDate(b[0]))
       .slice(-7)
       .map(([date, amount]) => {
-        const [d, m] = date.split("/");
-        return { day: `${d}/${m}`, amount };
+        const slash = date.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);
+        const dash = date.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+        if (slash) return { day: `${slash[1]}/${slash[2]}`, amount };
+        if (dash) return { day: `${dash[1]}/${dash[2]}`, amount };
+        return { day: date, amount };
       });
 
     return {
@@ -110,14 +133,39 @@ export default function Home() {
 
   const recentTransactions = useMemo(() => {
     return [...transactions]
-      .sort((a, b) => parseDDMMYY(b.date) - parseDDMMYY(a.date))
+      .sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date))
       .slice(0, 8);
   }, [transactions]);
+
+  const bankBalances = useMemo(() => {
+    return banks.map((bank) => {
+      const candidates = transactions.filter(
+        (tx) =>
+          tx.bankId === bank.id &&
+          tx.statementType === "bank_account" &&
+          typeof tx.closingBalance === "number"
+      );
+
+      const latest = [...candidates].sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date))[0];
+      const sourceLabel = latest?.cardId
+        ? bank.cards.find((card) => card.id === latest.cardId)?.nickname
+        : undefined;
+
+      return {
+        bankId: bank.id,
+        bankName: bank.name,
+        bankColor: bank.color,
+        closingBalance: latest?.closingBalance,
+        asOfDate: latest?.date,
+        sourceLabel,
+      };
+    });
+  }, [banks, transactions]);
 
   if (!loaded || !accountsLoaded) return <div className="p-8 text-sm text-muted-foreground">Loading dashboard...</div>;
 
   return (
-    <div className="p-8 space-y-8 max-w-[1200px]">
+    <div className="p-8 space-y-8 max-w-[1200px] rounded-2xl bg-gradient-to-b from-background via-background to-muted/20">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -132,20 +180,20 @@ export default function Home() {
 
       {/* Summary Cards */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <Card className="col-span-2 lg:col-span-1 bg-foreground text-background border-none">
+        <Card className="col-span-2 lg:col-span-1 border-none bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shadow-sm">
           <CardContent className="p-5">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium opacity-60">Net Income</span>
-              <ArrowUpRight className="h-3.5 w-3.5 opacity-50" />
+              <span className="text-xs font-medium opacity-80">Net Income</span>
+              <ArrowUpRight className="h-3.5 w-3.5 opacity-80" />
             </div>
             <div className="text-2xl font-semibold">₹{metrics.netIncome.toLocaleString("en-IN")}</div>
-            <p className="text-[11px] opacity-50 mt-1 flex items-center gap-1">
+            <p className="text-[11px] opacity-80 mt-1 flex items-center gap-1">
               After reversals/debits
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="bg-card/80 backdrop-blur border-border/70">
           <CardContent className="p-5">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-medium text-muted-foreground">Net Spend</span>
@@ -156,7 +204,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="bg-card/80 backdrop-blur border-border/70">
           <CardContent className="p-5">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-medium text-muted-foreground">CC Settlements</span>
@@ -167,7 +215,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="bg-card/80 backdrop-blur border-border/70">
           <CardContent className="p-5">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-medium text-muted-foreground">Top Category</span>
@@ -181,52 +229,92 @@ export default function Home() {
         </Card>
       </div>
 
+      {/* Bank Balances */}
+      <Card className="bg-card/80 backdrop-blur border-border/70">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold">Balances</CardTitle>
+          <CardDescription className="text-xs">Latest closing balance for each bank account from uploaded bank statements.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {bankBalances.length === 0 ? (
+            <div className="text-xs text-muted-foreground">No bank accounts configured yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {bankBalances.map((item) => (
+                <div key={item.bankId} className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/35 px-3 py-2.5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.bankColor }} />
+                      <p className="text-sm font-medium">{item.bankName}</p>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {item.closingBalance != null
+                        ? `As of ${item.asOfDate}${item.sourceLabel ? ` · ${item.sourceLabel}` : ""}`
+                        : "No statement closing balance yet"}
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold tabular-nums">
+                    {item.closingBalance != null ? formatINR(item.closingBalance) : "—"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Charts */}
       {transactions.length > 0 ? (
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-7">
-          <Card className="lg:col-span-4">
+          <Card className="lg:col-span-4 bg-card/80 backdrop-blur border-border/70">
             <CardHeader className="pb-0">
               <CardTitle className="text-sm font-semibold">Daily Spending</CardTitle>
               <CardDescription className="text-xs">Your most recent active days</CardDescription>
             </CardHeader>
             <CardContent className="pt-4 px-2">
-              <ChartContainer config={chartConfig} className="h-[220px] w-full">
+              <ChartContainer
+                config={chartConfig}
+                className="h-[220px] w-full [&_.recharts-cartesian-axis-tick_text]:fill-foreground/85 dark:[&_.recharts-cartesian-axis-tick_text]:fill-foreground/95"
+              >
                 <AreaChart data={metrics.areaData} margin={{ left: 0, right: 16, top: 4, bottom: 0 }}>
                   <defs>
                     <linearGradient id="fillAmount" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-amount)" stopOpacity={0.15} />
+                      <stop offset="5%" stopColor="var(--color-amount)" stopOpacity={0.28} />
                       <stop offset="95%" stopColor="var(--color-amount)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/60" />
+                  <CartesianGrid vertical={false} stroke="hsl(var(--border))" strokeOpacity={0.45} strokeDasharray="3 3" />
                   <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} className="text-[10px]" />
                   <YAxis tickLine={false} axisLine={false} tickMargin={8} className="text-[10px]" tickFormatter={(v) => `₹${(v/1000).toFixed(0)}k`} />
-                  <ChartTooltip content={<ChartTooltipContent formatter={(v) => [`₹${Number(v).toLocaleString("en-IN")}`, "Spent"]} />} />
+                  <ChartTooltip content={<ChartTooltipContent className="border-border/80 bg-popover/95 backdrop-blur-sm" formatter={(v) => [`₹${Number(v).toLocaleString("en-IN")}`, "Spent"]} />} />
                   <Area dataKey="amount" type="monotone" fill="url(#fillAmount)" stroke="var(--color-amount)" strokeWidth={2} />
                 </AreaChart>
               </ChartContainer>
             </CardContent>
           </Card>
 
-          <Card className="lg:col-span-3">
+          <Card className="lg:col-span-3 bg-card/80 backdrop-blur border-border/70">
             <CardHeader className="pb-0">
               <CardTitle className="text-sm font-semibold">By Category</CardTitle>
               <CardDescription className="text-xs">Top categories overall</CardDescription>
             </CardHeader>
             <CardContent className="pt-4 px-2">
-              <ChartContainer config={chartConfig} className="h-[220px] w-full">
+              <ChartContainer
+                config={chartConfig}
+                className="h-[220px] w-full [&_.recharts-cartesian-axis-tick_text]:fill-foreground/85 dark:[&_.recharts-cartesian-axis-tick_text]:fill-foreground/95"
+              >
                 <BarChart data={metrics.categoryData} layout="vertical" margin={{ left: 0, right: 16, top: 0, bottom: 0 }}>
                   <XAxis type="number" hide />
                   <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} tickMargin={4} className="text-[10px]" width={80} />
-                  <ChartTooltip content={<ChartTooltipContent formatter={(v) => [`₹${Number(v).toLocaleString("en-IN")}`, ""]} />} />
-                  <Bar dataKey="amount" radius={[0, 4, 4, 0]} barSize={18} fill="var(--color-amount)" fillOpacity={0.85} />
+                  <ChartTooltip content={<ChartTooltipContent className="border-border/80 bg-popover/95 backdrop-blur-sm" formatter={(v) => [`₹${Number(v).toLocaleString("en-IN")}`, ""]} />} />
+                  <Bar dataKey="amount" radius={[0, 4, 4, 0]} barSize={18} fill="var(--color-amount)" fillOpacity={0.92} />
                 </BarChart>
               </ChartContainer>
             </CardContent>
           </Card>
         </div>
       ) : (
-        <Card className="border-dashed bg-muted/20">
+        <Card className="border-dashed border-border/70 bg-muted/25">
           <CardContent className="p-12 text-center text-muted-foreground flex flex-col items-center justify-center gap-3">
             <IndianRupee className="h-8 w-8 opacity-20" />
             <div>
@@ -239,7 +327,7 @@ export default function Home() {
 
       {/* Transactions Table */}
       {transactions.length > 0 && (
-        <Card>
+        <Card className="bg-card/80 backdrop-blur border-border/70">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div>
               <CardTitle className="text-sm font-semibold">Recent Transactions</CardTitle>

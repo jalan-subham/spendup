@@ -147,7 +147,7 @@ export default function ExplorePage() {
           {/* Type */}
           <div className="min-w-[160px]">
             <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1 block">Type</label>
-            <Select value={filterType} onValueChange={setFilterType}>
+            <Select value={filterType} onValueChange={(v) => v && setFilterType(v)}>
               <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All types</SelectItem>
@@ -161,7 +161,7 @@ export default function ExplorePage() {
           {/* Bank */}
           <div className="min-w-[140px]">
             <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1 block">Bank</label>
-            <Select value={filterBank} onValueChange={setFilterBank}>
+            <Select value={filterBank} onValueChange={(v) => v && setFilterBank(v)}>
               <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All banks</SelectItem>
@@ -175,7 +175,7 @@ export default function ExplorePage() {
           {/* Category */}
           <div className="min-w-[140px]">
             <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1 block">Category</label>
-            <Select value={filterCategory} onValueChange={setFilterCategory}>
+            <Select value={filterCategory} onValueChange={(v) => v && setFilterCategory(v)}>
               <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All categories</SelectItem>

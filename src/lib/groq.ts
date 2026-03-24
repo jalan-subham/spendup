@@ -13,7 +13,7 @@ export interface ClassifiedRow {
   notes?: string;
 }
 
-const SYSTEM_PROMPT = `You are classifying Indian bank transactions. 
+const BASE_SYSTEM_PROMPT = `You are classifying Indian bank transactions. 
 Given a list of transactions (narration + debit/credit amount in INR), classify each one.
 
 Transaction types:
@@ -33,9 +33,15 @@ Extract the payment method from the narration if possible (e.g. "UPI-...", "POS.
 Return a JSON array only. No markdown, no explanation. Each element:
 { "refNo": string, "transactionType": string, "category": string, "paymentMethod": "UPI" | "Debit" | "Credit Card" | "Net Banking" | "Other", "confidence": number (0-1), "notes": string (brief reason if confidence < 0.8) }`;
 
-export async function classifyTransactions(rows: HdfcRawRow[]): Promise<ClassifiedRow[]> {
+export async function classifyTransactions(rows: HdfcRawRow[], metaHints: string[] = []): Promise<ClassifiedRow[]> {
   const BATCH_SIZE = 25;
   const results: ClassifiedRow[] = [];
+
+  const metaSection = metaHints.length
+    ? `\n\nAdditional user-selected classification metas (high-priority heuristics):\n- ${metaHints.join("\n- ")}`
+    : "";
+
+  const systemPrompt = `${BASE_SYSTEM_PROMPT}${metaSection}`;
 
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
@@ -49,7 +55,7 @@ export async function classifyTransactions(rows: HdfcRawRow[]): Promise<Classifi
     const completion = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify(payload) },
       ],
       temperature: 0.1,

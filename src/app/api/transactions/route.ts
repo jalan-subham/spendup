@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
             statementType: t.statementType ?? null,
             bankId: t.bankId ?? null,
             cardId: t.cardId ?? null,
-            // (linkedBillId is populated dynamically via separate endpoint or app state)
+            linkedBillId: t.linkedBillId ?? null,
           },
         })
       )

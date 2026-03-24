@@ -111,12 +111,12 @@ export const COMMON_BANKS: Omit<Bank, "id" | "cards">[] = [
 
 export const CATEGORIES = [
   "Food",
-  "Transport",
   "Shopping",
   "Utilities",
   "Entertainment",
   "Travel",
   "Health",
+  "Transport",
   "Fuel",
   "Rent",
   "Education",
