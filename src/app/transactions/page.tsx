@@ -1341,6 +1341,10 @@ export default function ImportPage() {
   const splitTracked = ledgerTransactions
     .filter((tx) => tx.splitStatus && tx.splitStatus !== "none")
     .sort((a, b) => (a.date < b.date ? 1 : -1));
+  const splitTrackerTotal = splitTracked.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+  const splitTrackerPending = splitTracked
+    .filter((tx) => tx.splitStatus === "to_split" || tx.splitStatus === "splitwise_logged")
+    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
 
   return (
     <div className="p-8 space-y-6 max-w-[1300px]">
@@ -1407,6 +1411,17 @@ export default function ImportPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="text-[11px] text-muted-foreground">Total In Split Tracker</p>
+                  <p className="text-sm font-semibold">{formatINR(splitTrackerTotal)}</p>
+                </div>
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="text-[11px] text-muted-foreground">Pending (To Split + On Splitwise)</p>
+                  <p className="text-sm font-semibold">{formatINR(splitTrackerPending)}</p>
+                </div>
+              </div>
+
               {trackerError && <p className="text-xs text-destructive">{trackerError}</p>}
 
               {trackerLoading ? (
