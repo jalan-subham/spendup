@@ -4,6 +4,41 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* View Transitions API for smooth page transitions */
+html {
+  view-transition-name: root;
+}
+
+::view-transition-old(root) {
+  animation: slide-out-to-right 0.4s ease-in-out;
+}
+
+::view-transition-new(root) {
+  animation: slide-in-from-left 0.4s ease-in-out;
+}
+
+@keyframes slide-out-to-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100px);
+  }
+}
+
+@keyframes slide-in-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-100px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

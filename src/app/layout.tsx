@@ -31,6 +31,7 @@ export default function RootLayout({
       lang="en"
       className={`${ibmPlexSans.variable} ${ibmPlexMono.variable} h-full antialiased`}
       suppressHydrationWarning
+      style={{ colorScheme: "light dark" }}
     >
       <body className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/20 flex">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
