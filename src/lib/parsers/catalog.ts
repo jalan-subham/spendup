@@ -1,4 +1,4 @@
-export type ParserId = "hdfc_text" | "icici_xls";
+export type ParserId = "hdfc_text" | "icici_xls" | "hdfc_swiggy_cc_pdf";
 
 export interface ParserCatalogItem {
   id: ParserId;
@@ -28,6 +28,14 @@ export const PARSER_CATALOG: ParserCatalogItem[] = [
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ],
     acceptsPassword: false,
+  },
+  {
+    id: "hdfc_swiggy_cc_pdf",
+    label: "HDFC Swiggy CC PDF Parser",
+    description: "Parses HDFC Swiggy credit-card PDF statements (supports password-protected PDFs).",
+    supportedExtensions: [".pdf"],
+    supportedMimeTypes: ["application/pdf"],
+    acceptsPassword: true,
   },
 ];
 

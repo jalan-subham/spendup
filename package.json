@@ -39,6 +39,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
+    "pg": "^8.20.0",
     "prisma": "^6.0.0",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",

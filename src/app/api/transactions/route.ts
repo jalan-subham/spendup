@@ -3,6 +3,11 @@ import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import type { Transaction } from "@/lib/types";
 
+function hasUnknownCommentArgument(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return error.message.includes("Unknown argument `comment`");
+}
+
 async function requireUserId(req: NextRequest): Promise<string | NextResponse> {
   const session = await getSession(req);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -18,7 +23,11 @@ export async function GET(req: NextRequest) {
       where: { userId },
       orderBy: { date: "desc" },
     });
-    return NextResponse.json(rows);
+    return NextResponse.json(rows, {
+      headers: {
+        "Cache-Control": "private, max-age=20, stale-while-revalidate=60",
+      },
+    });
   } catch (e) {
     console.error("[GET /api/transactions]", e);
     return NextResponse.json({ error: "Failed to fetch" }, { status: 500 });
@@ -44,6 +53,7 @@ export async function POST(req: NextRequest) {
             userId,
             date: t.date,
             narration: t.narration,
+            ...(t.comment != null ? { comment: t.comment } : {}),
             amount: t.amount,
             category: t.category ?? null,
             transactionType: t.transactionType,
@@ -78,7 +88,29 @@ export async function PATCH(req: NextRequest) {
   try {
     const { id, ...data } = await req.json();
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-    const updated = await prisma.transaction.update({ where: { id, userId }, data });
+    let updated;
+    try {
+      updated = await prisma.transaction.update({ where: { id, userId }, data });
+    } catch (e) {
+      if (!hasUnknownCommentArgument(e) || !("comment" in data)) {
+        throw e;
+      }
+
+      const { comment, ...dataWithoutComment } = data as Record<string, unknown>;
+      updated = await prisma.transaction.update({
+        where: { id, userId },
+        data: dataWithoutComment,
+      });
+
+      // Fallback for stale generated Prisma client that doesn't know `comment` yet.
+      await prisma.$executeRaw`
+        UPDATE "Transaction"
+        SET "comment" = ${comment == null ? null : String(comment)}
+        WHERE "id" = ${id} AND "userId" = ${userId}
+      `;
+
+      return NextResponse.json({ ...updated, comment: comment == null ? null : String(comment) });
+    }
     return NextResponse.json(updated);
   } catch (e) {
     console.error("[PATCH /api/transactions]", e);

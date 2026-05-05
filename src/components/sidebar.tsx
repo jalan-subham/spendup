@@ -4,15 +4,14 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, ReceiptText, BarChart3, Settings, Upload, Compass, LogOut, Sun, Moon } from "lucide-react";
+import { LayoutDashboard, ReceiptText, Settings, Upload, LogOut, Sun, Moon, CreditCard, ShieldCheck } from "lucide-react";
 import { useTheme } from "next-themes";
 
 const navItems = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
-  { name: "Explore", href: "/explore", icon: Compass },
   { name: "Import", href: "/transactions", icon: Upload },
-  { name: "Bills", href: "/bills", icon: ReceiptText },
-  { name: "Analytics", href: "/analytics", icon: BarChart3 },
+  { name: "Bills & CC", href: "/bills", icon: CreditCard },
+  { name: "Sanity", href: "/sanity", icon: ShieldCheck },
 ];
 
 const bottomItems = [

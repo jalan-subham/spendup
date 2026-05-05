@@ -39,7 +39,7 @@ export interface StatementSource {
 
 // ─── Transaction model ────────────────────────────────────────────────────────
 
-export type TransactionType = "spend" | "income" | "income_debit" | "cc_settlement" | "investment" | "transfer_in" | "transfer_out" | "refund" | "refund_settlement";
+export type TransactionType = "spend" | "income" | "income_debit" | "cc_settlement" | "investment" | "transfer_in" | "transfer_out" | "refund" | "refund_settlement" | "adjustment" | "excluded";
 
 export type SplitStatus = "none" | "to_split" | "splitwise_logged" | "settled";
 
@@ -51,6 +51,7 @@ export interface Transaction {
   refNo: string;
   date: string;            // DD/MM/YY or ISO
   narration: string;
+  comment?: string;
   amount: number;          // negative = debit/spend, positive = credit/income
   category?: string;
   transactionType: TransactionType;
@@ -122,6 +123,7 @@ export const CATEGORIES = [
   "Education",
   "Subscription",
   "Groceries",
+  "Cashback",
   "Investment",
   "Income",
   "Transfer",

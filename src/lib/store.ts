@@ -1,7 +1,55 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { Bank, Card, CardType } from "@/lib/types";
+import type { Bank, Card, CardType, Transaction } from "@/lib/types";
+
+const TRANSACTIONS_CACHE_TTL_MS = 30_000;
+
+let transactionsCache: Transaction[] | null = null;
+let transactionsLastFetchedAt = 0;
+let transactionsRequest: Promise<Transaction[]> | null = null;
+const transactionSubscribers = new Set<(rows: Transaction[]) => void>();
+
+function notifyTransactionSubscribers(rows: Transaction[]) {
+  transactionSubscribers.forEach((subscriber) => subscriber(rows));
+}
+
+function setTransactionsCache(rows: Transaction[]) {
+  transactionsCache = rows;
+  transactionsLastFetchedAt = Date.now();
+  notifyTransactionSubscribers(rows);
+}
+
+function shouldUseTransactionsCache() {
+  if (!transactionsCache) return false;
+  return Date.now() - transactionsLastFetchedAt < TRANSACTIONS_CACHE_TTL_MS;
+}
+
+async function fetchTransactions(force = false): Promise<Transaction[]> {
+  if (!force && shouldUseTransactionsCache()) {
+    return transactionsCache ?? [];
+  }
+
+  if (!force && transactionsRequest) {
+    return transactionsRequest;
+  }
+
+  const request = fetch("/api/transactions")
+    .then(async (res) => {
+      if (!res.ok) return [] as Transaction[];
+      const data = await parseJsonSafely<Transaction[]>(res);
+      return Array.isArray(data) ? data : [];
+    })
+    .catch(() => [] as Transaction[])
+    .finally(() => {
+      transactionsRequest = null;
+    });
+
+  transactionsRequest = request;
+  const rows = await request;
+  setTransactionsCache(rows);
+  return rows;
+}
 
 async function parseJsonSafely<T>(res: Response): Promise<T | null> {
   const raw = await res.text();
@@ -111,4 +159,52 @@ export function useAccounts() {
   }, []);
 
   return { banks, loaded, addBank, removeBank, updateBank, addCard, removeCard };
+}
+
+// ─── useTransactions ─────────────────────────────────────────────────────────
+
+export function useTransactions() {
+  const [transactions, setTransactionsState] = useState<Transaction[]>(transactionsCache ?? []);
+  const [loaded, setLoaded] = useState<boolean>(transactionsCache !== null);
+
+  useEffect(() => {
+    const subscriber = (rows: Transaction[]) => {
+      setTransactionsState(rows);
+      setLoaded(true);
+    };
+
+    transactionSubscribers.add(subscriber);
+
+    if (transactionsCache !== null) {
+      setTransactionsState(transactionsCache);
+      setLoaded(true);
+
+      // Keep cached data snappy while refreshing stale snapshots in the background.
+      if (!shouldUseTransactionsCache()) {
+        void fetchTransactions(true);
+      }
+    } else {
+      void fetchTransactions().finally(() => setLoaded(true));
+    }
+
+    return () => {
+      transactionSubscribers.delete(subscriber);
+    };
+  }, []);
+
+  const setTransactions = useCallback((updater: Transaction[] | ((prev: Transaction[]) => Transaction[])) => {
+    const next = typeof updater === "function"
+      ? (updater as (prev: Transaction[]) => Transaction[])(transactionsCache ?? [])
+      : updater;
+    setTransactionsCache(next);
+    setLoaded(true);
+  }, []);
+
+  const refreshTransactions = useCallback(async () => {
+    const rows = await fetchTransactions(true);
+    setLoaded(true);
+    return rows;
+  }, []);
+
+  return { transactions, loaded, setTransactions, refreshTransactions };
 }

@@ -1,239 +1,356 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import type { Transaction } from "@/lib/types";
-import { useAccounts } from "@/lib/store";
+import { useAccounts, useTransactions } from "@/lib/store";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { ArrowUpRight, CreditCard, IndianRupee, TrendingDown, TrendingUp, Download, Search, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts";
+import { ArrowDownRight, ArrowUpRight, ChevronLeft, ChevronRight, IndianRupee, Search, TrendingUp, PiggyBank, Landmark, AlertTriangle, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+
+const PIE_COLORS = ["#0d9488", "#f59e0b", "#6366f1", "#ef4444", "#22c55e", "#3b82f6", "#ec4899", "#64748b"];
 
 const chartConfig = {
   amount: {
-    label: "₹ Spent",
-    theme: {
-      light: "hsl(var(--chart-1))",
-      dark: "oklch(0.78 0.17 250)",
-    },
+    label: "Amount",
+    theme: { light: "hsl(var(--chart-1))", dark: "oklch(0.74 0.17 248)" },
   },
 } satisfies ChartConfig;
 
 function formatINR(amount: number) {
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Math.abs(amount));
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Math.abs(amount));
 }
 
 function parseTxnDate(s: string) {
   if (!s) return 0;
-  // Supports DD/MM/YY, DD/MM/YYYY, DD-MM-YYYY and ISO-like strings.
   const slash = s.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);
   if (slash) {
     const [, d, m, yRaw] = slash;
     const y = yRaw.length === 2 ? 2000 + parseInt(yRaw, 10) : parseInt(yRaw, 10);
     return new Date(y, parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
   }
-
   const dash = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
   if (dash) {
     const [, d, m, y] = dash;
     return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
   }
-
   const isoTime = new Date(s).getTime();
   return Number.isNaN(isoTime) ? 0 : isoTime;
 }
 
+function txnMonth(s: string): string {
+  const ts = parseTxnDate(s);
+  if (!ts) return "";
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(ym: string): string {
+  const [y, m] = ym.split("-");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[parseInt(m, 10) - 1]} ${y}`;
+}
+
+function formatShortDate(s: string): string {
+  const ts = parseTxnDate(s);
+  if (!ts) return s;
+  return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" }).format(ts);
+}
+
+// Sanity check helpers
+const ALLOWED_POSITIVE = new Set(["income", "refund", "refund_settlement", "transfer_in"]);
+const ALLOWED_NEGATIVE = new Set(["spend", "transfer_out", "investment", "cc_settlement", "income_debit"]);
+
 export default function Home() {
   const { banks, loaded: accountsLoaded } = useAccounts();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const { transactions, loaded: transactionsLoaded } = useTransactions();
+  const [recentSearch, setRecentSearch] = useState("");
+  const deferredSearch = useDeferredValue(recentSearch);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/transactions")
-      .then(r => r.ok ? r.json() : [])
-      .then((data: Transaction[]) => setTransactions(data))
-      .catch(() => {})
-      .finally(() => setLoaded(true));
-  }, []);
+  // Month picker - default to current month
+  const allMonths = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach((t) => { const m = txnMonth(t.date); if (m) set.add(m); });
+    return Array.from(set).sort();
+  }, [transactions]);
+
+  const now = new Date();
+  const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const defaultMonth = allMonths.includes(currentYM) ? currentYM : allMonths[allMonths.length - 1] || currentYM;
+  const [selectedMonth, setSelectedMonth] = useState("");
+  const activeMonth = selectedMonth || defaultMonth;
+
+  const monthIdx = allMonths.indexOf(activeMonth);
+  const canPrev = monthIdx > 0;
+  const canNext = monthIdx < allMonths.length - 1;
+  const goPrev = () => canPrev && setSelectedMonth(allMonths[monthIdx - 1]);
+  const goNext = () => canNext && setSelectedMonth(allMonths[monthIdx + 1]);
+  const isAllTime = activeMonth === "all";
+
+  const monthTxns = useMemo(() => {
+    if (isAllTime) return transactions.filter((t) => t.transactionType !== "excluded");
+    return transactions.filter((t) => txnMonth(t.date) === activeMonth && t.transactionType !== "excluded");
+  }, [transactions, activeMonth, isAllTime]);
+
+  // Sanity violations (all-time)
+  const sanityViolations = useMemo(() => {
+    return transactions.filter((t) => {
+      if (t.transactionType === "excluded") return false;
+      if (t.amount > 0 && !ALLOWED_POSITIVE.has(t.transactionType)) return true;
+      if (t.amount < 0 && !ALLOWED_NEGATIVE.has(t.transactionType)) return true;
+      return false;
+    });
+  }, [transactions]);
 
   const metrics = useMemo(() => {
-    let spendSum = 0;
-    let refundSettleSum = 0;
+    let actualSpend = 0;
     let incomeSum = 0;
-    let incomeDebitSum = 0;
-    let ccSettleSum = 0;
     let investSum = 0;
-
-    // Seed net balance with all opening balances
-    let netBalance = banks.reduce((s, b) => s + (b.openingBalance || 0), 0);
+    let ccSettleSum = 0;
+    let transferIn = 0;
+    let transferOut = 0;
+    let refundSum = 0;
 
     const categoryMap: Record<string, number> = {};
-    const dailyMap: Record<string, number> = {};
+    const dailySpendMap = new Map<string, number>();
 
-    transactions.forEach(t => {
-      // Calculate global net balance directly from amounts signed
-      netBalance += t.amount;
+    for (const tx of monthTxns) {
+      const abs = Math.abs(tx.amount);
 
-      const amtAbs = Math.abs(t.amount);
-
-      if (t.transactionType === "spend") {
-        spendSum += amtAbs;
-        if (t.category && t.category !== "Other") {
-          categoryMap[t.category] = (categoryMap[t.category] || 0) + amtAbs;
-        }
-        dailyMap[t.date] = (dailyMap[t.date] || 0) + amtAbs;
-      } else if (t.transactionType === "refund_settlement") {
-        refundSettleSum += amtAbs;
-      } else if (t.transactionType === "income") {
-        incomeSum += amtAbs;
-      } else if (t.transactionType === "income_debit") {
-        incomeDebitSum += amtAbs;
-      } else if (t.transactionType === "cc_settlement") {
-        ccSettleSum += amtAbs;
-      } else if (t.transactionType === "investment") {
-        investSum += amtAbs;
+      switch (tx.transactionType) {
+        case "spend":
+          actualSpend += abs;
+          // Category breakdown
+          if (tx.category && tx.category !== "Other") {
+            categoryMap[tx.category] = (categoryMap[tx.category] ?? 0) + abs;
+          } else {
+            categoryMap["Other"] = (categoryMap["Other"] ?? 0) + abs;
+          }
+          // Daily spend
+          dailySpendMap.set(tx.date, (dailySpendMap.get(tx.date) ?? 0) + abs);
+          break;
+        case "income":
+          incomeSum += abs;
+          break;
+        case "investment":
+          investSum += abs;
+          break;
+        case "cc_settlement":
+          ccSettleSum += abs;
+          break;
+        case "transfer_in":
+          transferIn += abs;
+          break;
+        case "transfer_out":
+          transferOut += abs;
+          break;
+        case "refund":
+        case "refund_settlement":
+          refundSum += abs;
+          break;
       }
-    });
+    }
 
-    const netSpends = Math.max(0, spendSum - refundSettleSum);
-    const netIncome = Math.max(0, incomeSum - incomeDebitSum);
+    const netIncome = incomeSum + refundSum;
+    const savingsRate = netIncome > 0 ? Math.round(((netIncome - actualSpend) / netIncome) * 100) : 0;
 
     const categoryData = Object.entries(categoryMap)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
       .map(([name, amount]) => ({ name, amount }));
 
-    const topCategory = categoryData.length > 0 ? categoryData[0] : null;
-
-    const areaData = Object.entries(dailyMap)
+    const areaData = Array.from(dailySpendMap.entries())
       .sort((a, b) => parseTxnDate(a[0]) - parseTxnDate(b[0]))
-      .slice(-7)
-      .map(([date, amount]) => {
-        const slash = date.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);
-        const dash = date.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-        if (slash) return { day: `${slash[1]}/${slash[2]}`, amount };
-        if (dash) return { day: `${dash[1]}/${dash[2]}`, amount };
-        return { day: date, amount };
-      });
+      .map(([date, amount]) => ({ day: formatShortDate(date), amount }));
 
     return {
-      netBalance,
-      netSpends,
+      actualSpend,
       netIncome,
-      ccSettleSum,
       investSum,
-      topCategory,
+      ccSettleSum,
+      savingsRate,
+      refundSum,
+      transferIn,
+      transferOut,
+      txnCount: monthTxns.length,
+      spendCount: monthTxns.filter((t) => t.transactionType === "spend").length,
       categoryData,
       areaData,
-      spendCount: transactions.filter(t => t.transactionType === 'spend').length
     };
-  }, [transactions, banks]);
+  }, [monthTxns]);
+
+  const categoryTransactions = useMemo(() => {
+    if (!selectedCategory) return [];
+    return monthTxns
+      .filter((t) => t.transactionType === "spend" && (t.category || "Other") === selectedCategory)
+      .sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date));
+  }, [monthTxns, selectedCategory]);
 
   const recentTransactions = useMemo(() => {
-    return [...transactions]
-      .sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date))
-      .slice(0, 8);
-  }, [transactions]);
+    const query = deferredSearch.trim().toLowerCase();
+    const filtered = query
+      ? monthTxns.filter(
+          (t) =>
+            t.narration.toLowerCase().includes(query) ||
+            t.transactionType.toLowerCase().includes(query) ||
+            (t.category || "").toLowerCase().includes(query)
+        )
+      : monthTxns;
+    return [...filtered].sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date)).slice(0, 15);
+  }, [monthTxns, deferredSearch]);
 
   const bankBalances = useMemo(() => {
+    const latestByBank = new Map<string, Transaction>();
+    for (const tx of transactions) {
+      if (tx.statementType !== "bank_account" || tx.bankId == null || typeof tx.closingBalance !== "number") continue;
+      const existing = latestByBank.get(tx.bankId);
+      if (!existing || parseTxnDate(tx.date) > parseTxnDate(existing.date)) {
+        latestByBank.set(tx.bankId, tx);
+      }
+    }
     return banks.map((bank) => {
-      const candidates = transactions.filter(
-        (tx) =>
-          tx.bankId === bank.id &&
-          tx.statementType === "bank_account" &&
-          typeof tx.closingBalance === "number"
-      );
-
-      const latest = [...candidates].sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date))[0];
-      const sourceLabel = latest?.cardId
-        ? bank.cards.find((card) => card.id === latest.cardId)?.nickname
-        : undefined;
-
+      const latest = latestByBank.get(bank.id);
       return {
         bankId: bank.id,
         bankName: bank.name,
         bankColor: bank.color,
         closingBalance: latest?.closingBalance,
         asOfDate: latest?.date,
-        sourceLabel,
       };
     });
   }, [banks, transactions]);
 
-  if (!loaded || !accountsLoaded) return <div className="p-8 text-sm text-muted-foreground">Loading dashboard...</div>;
+  if (!transactionsLoaded || !accountsLoaded) {
+    return <div className="p-8 text-sm text-muted-foreground">Loading dashboard...</div>;
+  }
 
   return (
-    <div className="p-8 space-y-8 max-w-[1200px] rounded-2xl bg-gradient-to-b from-background via-background to-muted/20">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-1">Your Ledger</p>
-          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
+    <div className="mx-auto max-w-[1260px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+      {/* Header with month nav */}
+      <div className="rounded-3xl border border-border/70 bg-gradient-to-br from-slate-50 via-background to-emerald-50/70 p-5 shadow-sm dark:from-slate-900/60 dark:via-slate-950 dark:to-emerald-950/30">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">SpendUp</p>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight">Financial Overview</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={goPrev} disabled={!canPrev || isAllTime}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <button
+              onClick={() => setSelectedMonth(activeMonth === "all" ? defaultMonth : "all")}
+              className="min-w-[120px] rounded-xl border border-border/70 bg-background/80 px-4 py-1.5 text-center text-sm font-semibold tabular-nums backdrop-blur-sm transition-colors hover:bg-muted/60"
+            >
+              {isAllTime ? "All Time" : monthLabel(activeMonth)}
+            </button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={goNext} disabled={!canNext || isAllTime}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-        <Button size="sm" variant="outline" className="gap-2 text-xs">
-          <Download className="h-3.5 w-3.5" />
-          Export
-        </Button>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {metrics.txnCount} transactions · {metrics.spendCount} spends{isAllTime ? " (all time)" : ""}
+        </p>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <Card className="col-span-2 lg:col-span-1 border-none bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shadow-sm">
+      {/* Sanity alert */}
+      {sanityViolations.length > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-amber-300/50 bg-amber-50/80 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-300">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>
+            <strong>{sanityViolations.length}</strong> transaction{sanityViolations.length > 1 ? "s have" : " has"} sign/type mismatches.{" "}
+            <a href="/sanity" className="underline font-medium">Fix in Sanity →</a>
+          </span>
+        </div>
+      )}
+
+      {/* Top metrics */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Card className="border-none bg-gradient-to-br from-rose-600 to-rose-700 text-rose-50">
           <CardContent className="p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium opacity-80">Net Income</span>
-              <ArrowUpRight className="h-3.5 w-3.5 opacity-80" />
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs uppercase tracking-wide opacity-90">Actual Spend</span>
+              <ArrowDownRight className="h-4 w-4 opacity-80" />
             </div>
-            <div className="text-2xl font-semibold">₹{metrics.netIncome.toLocaleString("en-IN")}</div>
-            <p className="text-[11px] opacity-80 mt-1 flex items-center gap-1">
-              After reversals/debits
+            <p className="text-2xl font-semibold tabular-nums">{formatINR(metrics.actualSpend)}</p>
+            <p className="mt-1 text-xs text-rose-200">Goods & services only</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none bg-gradient-to-br from-emerald-600 to-emerald-700 text-emerald-50">
+          <CardContent className="p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs uppercase tracking-wide opacity-90">Income</span>
+              <ArrowUpRight className="h-4 w-4 opacity-80" />
+            </div>
+            <p className="text-2xl font-semibold tabular-nums">{formatINR(metrics.netIncome)}</p>
+            <p className="mt-1 text-xs text-emerald-200">Salary + refunds</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
+          <CardContent className="p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Savings Rate</span>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className={`text-2xl font-semibold tabular-nums ${metrics.savingsRate >= 0 ? "text-emerald-500" : "text-destructive"}`}>
+              {metrics.savingsRate}%
             </p>
+            <p className="mt-1 text-xs text-muted-foreground">(Income − Spend) / Income</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur border-border/70">
+        <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
           <CardContent className="p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-muted-foreground">Net Spend</span>
-              <TrendingDown className="h-3.5 w-3.5 text-destructive" />
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Investments</span>
+              <PiggyBank className="h-4 w-4 text-muted-foreground" />
             </div>
-            <div className="text-2xl font-semibold">₹{metrics.netSpends.toLocaleString("en-IN")}</div>
-            <p className="text-[11px] text-muted-foreground mt-1">{metrics.spendCount} transactions</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card/80 backdrop-blur border-border/70">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-muted-foreground">CC Settlements</span>
-              <CreditCard className="h-3.5 w-3.5 text-muted-foreground" />
-            </div>
-            <div className="text-2xl font-semibold">₹{metrics.ccSettleSum.toLocaleString("en-IN")}</div>
-            <p className="text-[11px] text-muted-foreground mt-1">Paid bills</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card/80 backdrop-blur border-border/70">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-muted-foreground">Top Category</span>
-              <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground" />
-            </div>
-            <div className="text-2xl font-semibold">{metrics.topCategory ? metrics.topCategory.name : "None yet"}</div>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              {metrics.topCategory ? `₹${metrics.topCategory.amount.toLocaleString("en-IN")} · Top spender` : "No categorised spends"}
-            </p>
+            <p className="text-2xl font-semibold tabular-nums text-violet-500">{formatINR(metrics.investSum)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">SIPs, MFs, stocks</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Bank Balances */}
-      <Card className="bg-card/80 backdrop-blur border-border/70">
+      {/* Money flow breakdown */}
+      <Card className="border-border/70 bg-card/85 backdrop-blur-md dark:bg-slate-900/70">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold">Money Flow</CardTitle>
+          <CardDescription className="text-xs">Where your money went this period. CC settlements are internal movements, not spend.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {[
+              { label: "CC Settlements", amount: metrics.ccSettleSum, color: "text-amber-500", caption: "Internal: bank → card" },
+              { label: "Investments", amount: metrics.investSum, color: "text-violet-500", caption: "Capital deployed" },
+              { label: "Transfers Out", amount: metrics.transferOut, color: "text-sky-500", caption: "To other accounts" },
+              { label: "Transfers In", amount: metrics.transferIn, color: "text-cyan-500", caption: "From other accounts" },
+              { label: "Refunds", amount: metrics.refundSum, color: "text-emerald-500", caption: "Money returned" },
+            ].map((item) => (
+              <div key={item.label} className="rounded-xl border border-border/60 bg-background/50 p-3 dark:bg-slate-900/40">
+                <p className="text-[11px] text-muted-foreground">{item.label}</p>
+                <p className={`mt-1 text-sm font-semibold tabular-nums ${item.color}`}>{formatINR(item.amount)}</p>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">{item.caption}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Balances */}
+      <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold">Balances</CardTitle>
-          <CardDescription className="text-xs">Latest closing balance for each bank account from uploaded bank statements.</CardDescription>
+          <CardTitle className="text-sm font-semibold">Bank Balances</CardTitle>
+          <CardDescription className="text-xs">Latest closing balance from uploaded statements.</CardDescription>
         </CardHeader>
         <CardContent>
           {bankBalances.length === 0 ? (
@@ -241,20 +358,18 @@ export default function Home() {
           ) : (
             <div className="space-y-2">
               {bankBalances.map((item) => (
-                <div key={item.bankId} className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/35 px-3 py-2.5">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.bankColor }} />
+                <div key={item.bankId} className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/35 px-3 py-2.5 dark:bg-slate-900/40">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.bankColor }} />
+                    <div>
                       <p className="text-sm font-medium">{item.bankName}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {item.closingBalance != null ? `As of ${formatShortDate(item.asOfDate!)}` : "No statement data"}
+                      </p>
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      {item.closingBalance != null
-                        ? `As of ${item.asOfDate}${item.sourceLabel ? ` · ${item.sourceLabel}` : ""}`
-                        : "No statement closing balance yet"}
-                    </p>
                   </div>
                   <p className="text-sm font-semibold tabular-nums">
-                    {item.closingBalance != null ? formatINR(item.closingBalance) : "—"}
+                    {item.closingBalance != null ? formatINR(item.closingBalance) : "-"}
                   </p>
                 </div>
               ))}
@@ -264,113 +379,203 @@ export default function Home() {
       </Card>
 
       {/* Charts */}
-      {transactions.length > 0 ? (
-        <div className="grid gap-4 grid-cols-1 lg:grid-cols-7">
-          <Card className="lg:col-span-4 bg-card/80 backdrop-blur border-border/70">
+      {monthTxns.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-7">
+          <Card className="border-border/70 bg-card/80 backdrop-blur-sm lg:col-span-4 dark:bg-slate-900/70">
             <CardHeader className="pb-0">
-              <CardTitle className="text-sm font-semibold">Daily Spending</CardTitle>
-              <CardDescription className="text-xs">Your most recent active days</CardDescription>
+              <CardTitle className="text-sm font-semibold">Daily Spend Trend</CardTitle>
+              <CardDescription className="text-xs">Spend per day (goods & services only)</CardDescription>
             </CardHeader>
-            <CardContent className="pt-4 px-2">
-              <ChartContainer
-                config={chartConfig}
-                className="h-[220px] w-full [&_.recharts-cartesian-axis-tick_text]:fill-foreground/85 dark:[&_.recharts-cartesian-axis-tick_text]:fill-foreground/95"
-              >
+            <CardContent className="px-2 pt-4">
+              <ChartContainer config={chartConfig} className="h-[220px] w-full">
                 <AreaChart data={metrics.areaData} margin={{ left: 0, right: 16, top: 4, bottom: 0 }}>
                   <defs>
                     <linearGradient id="fillAmount" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-amount)" stopOpacity={0.28} />
+                      <stop offset="5%" stopColor="var(--color-amount)" stopOpacity={0.3} />
                       <stop offset="95%" stopColor="var(--color-amount)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid vertical={false} stroke="hsl(var(--border))" strokeOpacity={0.45} strokeDasharray="3 3" />
                   <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} className="text-[10px]" />
-                  <YAxis tickLine={false} axisLine={false} tickMargin={8} className="text-[10px]" tickFormatter={(v) => `₹${(v/1000).toFixed(0)}k`} />
-                  <ChartTooltip content={<ChartTooltipContent className="border-border/80 bg-popover/95 backdrop-blur-sm" formatter={(v) => [`₹${Number(v).toLocaleString("en-IN")}`, "Spent"]} />} />
+                  <YAxis tickLine={false} axisLine={false} tickMargin={8} className="text-[10px]" tickFormatter={(v) => `₹${Math.round(v / 1000)}k`} />
+                  <ChartTooltip content={<ChartTooltipContent formatter={(v) => [formatINR(Number(v)), "Spend"]} />} />
                   <Area dataKey="amount" type="monotone" fill="url(#fillAmount)" stroke="var(--color-amount)" strokeWidth={2} />
                 </AreaChart>
               </ChartContainer>
             </CardContent>
           </Card>
 
-          <Card className="lg:col-span-3 bg-card/80 backdrop-blur border-border/70">
+          <Card className="border-border/70 bg-card/80 backdrop-blur-sm lg:col-span-3 dark:bg-slate-900/70">
             <CardHeader className="pb-0">
-              <CardTitle className="text-sm font-semibold">By Category</CardTitle>
-              <CardDescription className="text-xs">Top categories overall</CardDescription>
+              <CardTitle className="text-sm font-semibold">Category Breakdown</CardTitle>
+              <CardDescription className="text-xs">Where you spent</CardDescription>
             </CardHeader>
-            <CardContent className="pt-4 px-2">
-              <ChartContainer
-                config={chartConfig}
-                className="h-[220px] w-full [&_.recharts-cartesian-axis-tick_text]:fill-foreground/85 dark:[&_.recharts-cartesian-axis-tick_text]:fill-foreground/95"
-              >
-                <BarChart data={metrics.categoryData} layout="vertical" margin={{ left: 0, right: 16, top: 0, bottom: 0 }}>
-                  <XAxis type="number" hide />
-                  <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} tickMargin={4} className="text-[10px]" width={80} />
-                  <ChartTooltip content={<ChartTooltipContent className="border-border/80 bg-popover/95 backdrop-blur-sm" formatter={(v) => [`₹${Number(v).toLocaleString("en-IN")}`, ""]} />} />
-                  <Bar dataKey="amount" radius={[0, 4, 4, 0]} barSize={18} fill="var(--color-amount)" fillOpacity={0.92} />
-                </BarChart>
-              </ChartContainer>
+            <CardContent className="px-2 pt-4">
+              {metrics.categoryData.length > 0 ? (
+                <ChartContainer config={chartConfig} className="h-[220px] w-full">
+                  <PieChart>
+                    <Pie data={metrics.categoryData} dataKey="amount" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2} cursor="pointer" onClick={(_: unknown, idx: number) => setSelectedCategory(metrics.categoryData[idx]?.name ?? null)}>
+                      {metrics.categoryData.map((entry, i) => (
+                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} opacity={selectedCategory && selectedCategory !== entry.name ? 0.3 : 1} stroke={selectedCategory === entry.name ? "hsl(var(--foreground))" : "transparent"} strokeWidth={selectedCategory === entry.name ? 2 : 0} />
+                      ))}
+                    </Pie>
+                    <ChartTooltip content={<ChartTooltipContent hideLabel formatter={(v, name) => [formatINR(Number(v)), name as string]} />} />
+                  </PieChart>
+                </ChartContainer>
+              ) : (
+                <div className="flex h-[220px] items-center justify-center text-xs text-muted-foreground">No spend data</div>
+              )}
+              <div className="mt-2 grid grid-cols-2 gap-1">
+                {metrics.categoryData.slice(0, 8).map((c, i) => (
+                  <button
+                    key={c.name}
+                    onClick={() => setSelectedCategory(selectedCategory === c.name ? null : c.name)}
+                    className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[10px] text-left transition-colors ${selectedCategory === c.name ? "bg-accent font-semibold text-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"}`}
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
+                    {c.name}: {formatINR(c.amount)}
+                  </button>
+                ))}
+              </div>
             </CardContent>
           </Card>
         </div>
-      ) : (
-        <Card className="border-dashed border-border/70 bg-muted/25">
-          <CardContent className="p-12 text-center text-muted-foreground flex flex-col items-center justify-center gap-3">
-            <IndianRupee className="h-8 w-8 opacity-20" />
+      )}
+
+      {/* Category drill-down */}
+      {selectedCategory && (
+        <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div>
-              <p className="text-sm font-medium">No spending data</p>
-              <p className="text-xs mt-1">Upload a statement to populate your charts.</p>
+              <CardTitle className="text-sm font-semibold">{selectedCategory}</CardTitle>
+              <CardDescription className="text-xs">
+                {categoryTransactions.length} transaction{categoryTransactions.length !== 1 ? "s" : ""} · {formatINR(categoryTransactions.reduce((s, t) => s + Math.abs(t.amount), 0))} total
+              </CardDescription>
             </div>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSelectedCategory(null)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-y hover:bg-transparent">
+                  <TableHead className="pl-6 text-xs">Date</TableHead>
+                  <TableHead className="text-xs">Description</TableHead>
+                  <TableHead className="text-xs">Payment</TableHead>
+                  <TableHead className="pr-6 text-right text-xs">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {categoryTransactions.map((tx) => (
+                  <TableRow key={tx.id}>
+                    <TableCell className="pl-6 font-mono text-xs text-muted-foreground">{formatShortDate(tx.date)}</TableCell>
+                    <TableCell className="max-w-[300px] truncate text-sm font-medium">{tx.narration}</TableCell>
+                    <TableCell>
+                      <span className="inline-flex items-center rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        {tx.paymentMethod || "Other"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="pr-6 text-right text-sm font-medium tabular-nums">
+                      {formatINR(tx.amount)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {categoryTransactions.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="h-16 text-center text-xs text-muted-foreground">No transactions.</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
       )}
 
-      {/* Transactions Table */}
-      {transactions.length > 0 && (
-        <Card className="bg-card/80 backdrop-blur border-border/70">
+      {/* Recent transactions */}
+      {monthTxns.length > 0 && (
+        <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div>
               <CardTitle className="text-sm font-semibold">Recent Transactions</CardTitle>
-              <CardDescription className="text-xs">The latest additions to your ledger</CardDescription>
+              <CardDescription className="text-xs">{isAllTime ? "All time" : monthLabel(activeMonth)}</CardDescription>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                <Input type="search" placeholder="Search..." className="h-8 w-[200px] pl-8 text-xs" />
-              </div>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                type="search"
+                value={recentSearch}
+                onChange={(e) => setRecentSearch(e.target.value)}
+                placeholder="Search..."
+                className="h-8 w-[200px] pl-8 text-xs"
+              />
             </div>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
               <TableHeader>
-                <TableRow className="hover:bg-transparent border-y">
-                  <TableHead className="text-xs pl-6">Date</TableHead>
+                <TableRow className="border-y hover:bg-transparent">
+                  <TableHead className="pl-6 text-xs">Date</TableHead>
                   <TableHead className="text-xs">Description</TableHead>
                   <TableHead className="text-xs">Type</TableHead>
                   <TableHead className="text-xs">Category</TableHead>
-                  <TableHead className="text-xs text-right pr-6">Amount</TableHead>
+                  <TableHead className="pr-6 text-right text-xs">Amount</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {recentTransactions.map((tx) => (
-                  <TableRow key={tx.id} className="group">
-                    <TableCell className="pl-6 text-xs text-muted-foreground font-mono">{tx.date}</TableCell>
-                    <TableCell className="text-sm font-medium max-w-[200px] truncate">{tx.narration}</TableCell>
-                    <TableCell>
-                      <span className="text-[10px] text-muted-foreground">{tx.transactionType}</span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium bg-muted/40 text-muted-foreground">
-                        {tx.category || "Uncategorized"}
-                      </span>
-                    </TableCell>
-                    <TableCell className={`text-sm text-right pr-6 font-medium tabular-nums ${tx.amount < 0 ? "text-foreground" : "text-emerald-600"}`}>
-                      {tx.amount < 0 ? `−${formatINR(tx.amount)}` : `+${formatINR(tx.amount)}`}
+                {recentTransactions.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-16 text-center text-xs text-muted-foreground">
+                      No transactions match your search.
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  recentTransactions.map((tx) => {
+                    const typeColors: Record<string, string> = {
+                      spend: "", income: "text-emerald-500", refund: "text-emerald-500", refund_settlement: "text-emerald-500",
+                      cc_settlement: "text-amber-500", investment: "text-violet-500", transfer_in: "text-cyan-500",
+                      transfer_out: "text-sky-500", income_debit: "text-orange-500",
+                    };
+                    const typeLabels: Record<string, string> = {
+                      spend: "Spend", income: "Income", refund: "Refund", refund_settlement: "Refund",
+                      cc_settlement: "CC Payment", investment: "Invest", transfer_in: "Transfer In",
+                      transfer_out: "Transfer Out", income_debit: "Income Debit", adjustment: "Adjustment",
+                    };
+                    return (
+                      <TableRow key={tx.id}>
+                        <TableCell className="pl-6 font-mono text-xs text-muted-foreground">{formatShortDate(tx.date)}</TableCell>
+                        <TableCell className="max-w-[240px] truncate text-sm font-medium">{tx.narration}</TableCell>
+                        <TableCell>
+                          <span className={`inline-flex items-center rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium ${typeColors[tx.transactionType] || "text-muted-foreground"}`}>
+                            {typeLabels[tx.transactionType] || tx.transactionType}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {tx.category || "Uncategorized"}
+                          </span>
+                        </TableCell>
+                        <TableCell className={`pr-6 text-right text-sm font-medium tabular-nums ${tx.amount < 0 ? "text-foreground" : "text-emerald-500"}`}>
+                          {tx.amount < 0 ? `-${formatINR(tx.amount)}` : `+${formatINR(tx.amount)}`}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
               </TableBody>
             </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {transactions.length === 0 && (
+        <Card className="border-dashed border-border/70 bg-muted/25">
+          <CardContent className="flex flex-col items-center justify-center gap-3 p-12 text-center text-muted-foreground">
+            <IndianRupee className="h-8 w-8 opacity-20" />
+            <div>
+              <p className="text-sm font-medium">No spending data</p>
+              <p className="mt-1 text-xs">Upload a statement to populate your dashboard charts.</p>
+            </div>
           </CardContent>
         </Card>
       )}

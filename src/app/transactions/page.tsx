@@ -127,8 +127,8 @@ function Step1Upload({
   const nonCcCards = (selectedNonCcBank?.cards ?? []).filter((card) => card.type !== "credit");
 
   const billsForCard = bills.filter((bill) => bill.cardId === ccCardId);
-  const availableCycles = billsForCard.filter(
-    (bill) => !(bill.transactions ?? []).some((tx) => tx.statementType === "credit_card")
+  const previouslyImportedCycles = billsForCard.filter((bill) =>
+    (bill.transactions ?? []).some((tx) => tx.statementType === "credit_card")
   );
 
   useEffect(() => {
@@ -318,11 +318,11 @@ function Step1Upload({
                   <Select value={selectedCcBillId} onValueChange={(value) => setSelectedCcBillId(value ?? "")}>
                     <SelectTrigger className="h-8 text-xs" disabled={!ccCardId}>
                       <SelectValue placeholder="Link billing cycle">
-                        {availableCycles.find((bill) => bill.id === selectedCcBillId)?.cycleName}
+                        {billsForCard.find((bill) => bill.id === selectedCcBillId)?.cycleName}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {availableCycles.map((bill) => (
+                      {billsForCard.map((bill) => (
                         <SelectItem key={bill.id} value={bill.id} className="text-xs">
                           {bill.cycleName}
                         </SelectItem>
@@ -330,9 +330,15 @@ function Step1Upload({
                     </SelectContent>
                   </Select>
 
-                  {ccCardId && availableCycles.length === 0 && (
+                  {ccCardId && billsForCard.length === 0 && (
                     <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                      No free billing cycle found for this card. Create a new cycle in Bills and retry.
+                      No billing cycle found for this card. Create a cycle in Bills and retry.
+                    </p>
+                  )}
+
+                  {ccCardId && previouslyImportedCycles.length > 0 && (
+                    <p className="text-[10px] text-muted-foreground bg-muted/40 border border-border rounded px-2 py-1">
+                      {previouslyImportedCycles.length} cycle(s) already have imported CC rows. Re-upload is allowed; duplicates are skipped by ref no on save.
                     </p>
                   )}
                 </div>
@@ -423,7 +429,7 @@ function Step1Upload({
                   <p className="text-[11px] text-muted-foreground">Flow: <span className="text-foreground font-medium">{uploadKind === "cc" ? "CC Statement" : uploadKind === "non_cc" ? "Non-CC Bank Statement" : "Not selected"}</span></p>
                   <p className="text-[11px] text-muted-foreground mt-1">Sources: <span className="text-foreground font-medium">{sources.length}</span></p>
                   {uploadKind === "cc" && (
-                    <p className="text-[11px] text-muted-foreground mt-1">Billing cycle: <span className="text-foreground font-medium">{selectedCcBillId ? (availableCycles.find((bill) => bill.id === selectedCcBillId)?.cycleName || "Linked") : "Not selected"}</span></p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Billing cycle: <span className="text-foreground font-medium">{selectedCcBillId ? (billsForCard.find((bill) => bill.id === selectedCcBillId)?.cycleName || "Linked") : "Not selected"}</span></p>
                   )}
                   {sources.length > 0 && (
                     <div className="mt-2 pt-2 border-t space-y-1">
@@ -444,7 +450,7 @@ function Step1Upload({
 
             <div className="rounded-2xl border border-dashed bg-muted/20 p-6 md:p-8 text-center flex flex-col items-center justify-center min-h-[300px] cursor-pointer"
               onClick={() => !requiresPassword && canSelectFile && inputRef.current?.click()}>
-              <input ref={inputRef} type="file" accept=".txt,.text,.xls,.xlsx" className="hidden"
+              <input ref={inputRef} type="file" accept=".txt,.text,.xls,.xlsx,.pdf" className="hidden"
                 onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
               {loading ? (
                 <div className="space-y-3">
@@ -624,6 +630,8 @@ const TX_TYPE_COLORS: Record<string, string> = {
   investment: "text-violet-600",
   transfer: "text-blue-600",
   refund: "text-emerald-500",
+  adjustment: "text-sky-600",
+  excluded: "text-slate-500",
 };
 
 const TX_TYPE_LABELS: Record<string, string> = {
@@ -636,6 +644,8 @@ const TX_TYPE_LABELS: Record<string, string> = {
   transfer_out: "Transfer Out",
   refund: "Refund",
   refund_settlement: "Refund Settle",
+  adjustment: "Adjustment",
+  excluded: "Excluded",
 };
 
 const SPLIT_STATUS_LABELS: Record<NonNullable<Transaction["splitStatus"]>, string> = {
@@ -731,6 +741,8 @@ function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNe
   const totalIncoming = transactions.filter(t => t.amount >= 0).reduce((s, t) => s + Math.abs(t.amount), 0);
   const totalCC = transactions.filter(t => t.transactionType === "cc_settlement").reduce((s, t) => s + Math.abs(t.amount), 0);
   const totalInvest = transactions.filter(t => t.transactionType === "investment").reduce((s, t) => s + Math.abs(t.amount), 0);
+  const includedRows = transactions.filter(t => t.transactionType !== "excluded");
+  const includedNet = includedRows.reduce((s, t) => s - t.amount, 0);
 
   return (
     <div className="space-y-4">
@@ -745,12 +757,19 @@ function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNe
       </Card>
 
       {/* Summary totals */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { label: "Outgoing", value: totalOutgoing, color: "text-foreground", icon: <ArrowDownRight className="h-3.5 w-3.5" /> },
           { label: "Incoming", value: totalIncoming, color: "text-emerald-600", icon: <ArrowUpRight className="h-3.5 w-3.5" /> },
           { label: "CC Payments", value: totalCC, color: "text-amber-600", icon: <AlertTriangle className="h-3.5 w-3.5" /> },
           { label: "Investments", value: totalInvest, color: "text-violet-600", icon: <RefreshCw className="h-3.5 w-3.5" /> },
+          {
+            label: "Included Net",
+            value: includedNet,
+            color: includedNet >= 0 ? "text-foreground" : "text-emerald-600",
+            icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+            subLabel: `${includedRows.length} non-excluded`,
+          },
         ].map(item => (
           <Card key={item.label}>
             <CardContent className="p-4">
@@ -758,7 +777,12 @@ function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNe
                 <span className="text-xs text-muted-foreground">{item.label}</span>
                 <span className={item.color}>{item.icon}</span>
               </div>
-              <p className={`text-lg font-semibold ${item.color}`}>{formatINR(item.value)}</p>
+              <p className={`text-lg font-semibold ${item.color}`}>
+                {item.value >= 0 ? formatINR(item.value) : `-${formatINR(item.value)}`}
+              </p>
+              {"subLabel" in item && item.subLabel && (
+                <p className="text-[10px] text-muted-foreground mt-1">{item.subLabel}</p>
+              )}
             </CardContent>
           </Card>
         ))}
@@ -807,12 +831,14 @@ function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNe
               <TableRow className="hover:bg-transparent border-y">
                 <TableHead className="text-xs">Date</TableHead>
                 <TableHead className="text-xs">Narration</TableHead>
+                <TableHead className="text-xs">Comment</TableHead>
                 <TableHead className="text-xs">Source Card</TableHead>
                 <TableHead className="text-xs">Type</TableHead>
                 <TableHead className="text-xs">Category</TableHead>
                 <TableHead className="text-xs">Conf.</TableHead>
                 <TableHead className="text-xs text-right">Amount</TableHead>
                 <TableHead className="text-xs text-center pr-5">Split?</TableHead>
+                <TableHead className="text-xs text-center pr-5">Exclude</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -824,6 +850,14 @@ function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNe
                     <TableCell className="max-w-[260px]">
                       <p className="text-xs font-medium truncate">{tx.narration}</p>
                       {tx.refNo && <p className="text-[10px] text-muted-foreground font-mono">{tx.refNo}</p>}
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        value={tx.comment ?? ""}
+                        onChange={(e) => onUpdate(tx.id, { comment: e.target.value })}
+                        placeholder={tx.splitStatus === "to_split" || tx.splitStatus === "splitwise_logged" ? "Split note..." : "Add note..."}
+                        className="h-7 w-40 text-[10px]"
+                      />
                     </TableCell>
                     <TableCell>
                       {tx.statementType === "credit_card" ? (
@@ -852,7 +886,18 @@ function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNe
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
-                        <Select value={tx.transactionType} onValueChange={v => v && onUpdate(tx.id, { transactionType: v as Transaction["transactionType"], annotated: true })}>
+                        <Select
+                          value={tx.transactionType}
+                          onValueChange={(v) => {
+                            if (!v) return;
+                            const nextType = v as Transaction["transactionType"];
+                            onUpdate(tx.id, {
+                              transactionType: nextType,
+                              linkedBillId: nextType === "cc_settlement" ? tx.linkedBillId : undefined,
+                              annotated: true,
+                            });
+                          }}
+                        >
                           <SelectTrigger className="h-7 w-28 text-[10px] border-none shadow-none bg-muted/40 hover:bg-muted flex-shrink-0">
                             <SelectValue />
                           </SelectTrigger>
@@ -929,11 +974,37 @@ function Step4Review({ transactions, bills, banks, onUpdate, onBillCreated, onNe
                         <span className="text-[10px] text-muted-foreground">—</span>
                       )}
                     </TableCell>
+                    <TableCell className="text-center pr-5">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={tx.transactionType === "excluded"}
+                        aria-label={tx.transactionType === "excluded" ? "Included" : "Excluded"}
+                        onClick={() =>
+                          onUpdate(tx.id, {
+                            transactionType: tx.transactionType === "excluded" ? "spend" : "excluded",
+                            splitStatus: "none",
+                            annotated: true,
+                          })
+                        }
+                        className={`relative inline-flex h-7 w-12 items-center rounded-full border p-1 transition-colors ${
+                          tx.transactionType === "excluded"
+                            ? "bg-slate-700 border-slate-700"
+                            : "bg-muted border-border hover:border-slate-400"
+                        }`}
+                      >
+                        <span
+                          className={`h-5 w-5 rounded-full bg-background shadow-sm transition-transform ${
+                            tx.transactionType === "excluded" ? "translate-x-5" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </TableCell>
                   </TableRow>
                 );
               })}
               {filtered.length === 0 && (
-                <TableRow><TableCell colSpan={6} className="h-16 text-center text-xs text-muted-foreground">No matching transactions</TableCell></TableRow>
+                <TableRow><TableCell colSpan={10} className="h-16 text-center text-xs text-muted-foreground">No matching transactions</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -1034,6 +1105,8 @@ export default function ImportPage() {
   const [ledgerTransactions, setLedgerTransactions] = useState<Transaction[]>([]);
   const [trackerLoading, setTrackerLoading] = useState(false);
   const [trackerError, setTrackerError] = useState("");
+  const [splitCommentDrafts, setSplitCommentDrafts] = useState<Record<string, string>>({});
+  const [splitCommentSavingId, setSplitCommentSavingId] = useState<string>("");
   const [manualBusy, setManualBusy] = useState(false);
   const [manualMessage, setManualMessage] = useState("");
   const [manualTx, setManualTx] = useState({
@@ -1041,6 +1114,7 @@ export default function ImportPage() {
     refNo: "",
     date: "",
     narration: "",
+    comment: "",
     amount: "",
     category: "Other",
     transactionType: "spend" as Transaction["transactionType"],
@@ -1084,6 +1158,11 @@ export default function ImportPage() {
       if (!res.ok) throw new Error("Failed to load transactions");
       const data: Transaction[] = await res.json();
       setLedgerTransactions(data);
+      const commentDraftMap = data.reduce<Record<string, string>>((acc, tx) => {
+        acc[tx.id] = tx.comment ?? "";
+        return acc;
+      }, {});
+      setSplitCommentDrafts(commentDraftMap);
     } catch (e) {
       setTrackerError(e instanceof Error ? e.message : "Failed to load transactions");
     } finally {
@@ -1091,19 +1170,33 @@ export default function ImportPage() {
     }
   }, []);
 
-  const updateSplitStatus = useCallback(async (id: string, splitStatus: NonNullable<Transaction["splitStatus"]>) => {
+  const patchLedgerTx = useCallback(async (id: string, patch: Partial<Transaction>) => {
     const res = await fetch("/api/transactions", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, splitStatus }),
+      body: JSON.stringify({ id, ...patch }),
     });
 
     if (!res.ok) {
-      throw new Error("Failed to update split status");
+      throw new Error("Failed to update transaction");
     }
+  }, []);
+
+  const updateSplitStatus = useCallback(async (id: string, splitStatus: NonNullable<Transaction["splitStatus"]>) => {
+    await patchLedgerTx(id, { splitStatus });
 
     setLedgerTransactions((prev) => prev.map((tx) => (tx.id === id ? { ...tx, splitStatus } : tx)));
-  }, []);
+  }, [patchLedgerTx]);
+
+  const updateLedgerComment = useCallback(async (id: string, comment: string) => {
+    setSplitCommentSavingId(id);
+    try {
+      await patchLedgerTx(id, { comment: comment.trim() ? comment : undefined });
+      setLedgerTransactions((prev) => prev.map((tx) => (tx.id === id ? { ...tx, comment: comment.trim() ? comment : undefined } : tx)));
+    } finally {
+      setSplitCommentSavingId("");
+    }
+  }, [patchLedgerTx]);
 
   const handleManualCreate = useCallback(async () => {
     setManualMessage("");
@@ -1128,6 +1221,7 @@ export default function ImportPage() {
       refNo: manualTx.refNo.trim(),
       date: manualTx.date.trim(),
       narration: manualTx.narration.trim(),
+      comment: manualTx.comment.trim() || undefined,
       amount,
       category: manualTx.category || undefined,
       transactionType: manualTx.transactionType,
@@ -1251,9 +1345,11 @@ export default function ImportPage() {
         const finalType = shouldForceTransport
           ? "spend"
           : (cls?.transactionType ?? (isDebit ? "spend" : "income"));
-        const finalPaymentMethod = shouldForceTransport
-          ? "UPI"
-          : (cls?.paymentMethod ?? "Other");
+        const finalPaymentMethod = source?.statementType === "credit_card"
+          ? "Credit Card"
+          : shouldForceTransport
+            ? "UPI"
+            : (cls?.paymentMethod ?? "Other");
         const finalConfidence = shouldForceTransport
           ? Math.max(cls?.confidence ?? 0, 0.8)
           : cls?.confidence;
@@ -1434,6 +1530,7 @@ export default function ImportPage() {
                     <TableRow>
                       <TableHead className="text-xs">Date</TableHead>
                       <TableHead className="text-xs">Narration</TableHead>
+                      <TableHead className="text-xs">Comment</TableHead>
                       <TableHead className="text-xs text-right">Amount</TableHead>
                       <TableHead className="text-xs">Status</TableHead>
                       <TableHead className="text-xs">Actions</TableHead>
@@ -1444,6 +1541,31 @@ export default function ImportPage() {
                       <TableRow key={tx.id}>
                         <TableCell className="text-xs">{tx.date}</TableCell>
                         <TableCell className="text-xs max-w-[420px] truncate">{tx.narration}</TableCell>
+                        <TableCell className="w-[240px]">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={splitCommentDrafts[tx.id] ?? tx.comment ?? ""}
+                              onChange={(e) => setSplitCommentDrafts((prev) => ({ ...prev, [tx.id]: e.target.value }))}
+                              placeholder="Add split note..."
+                              className="h-7 text-[10px]"
+                            />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[10px]"
+                              disabled={splitCommentSavingId === tx.id || (splitCommentDrafts[tx.id] ?? tx.comment ?? "") === (tx.comment ?? "")}
+                              onClick={async () => {
+                                try {
+                                  await updateLedgerComment(tx.id, splitCommentDrafts[tx.id] ?? "");
+                                } catch {
+                                  alert("Failed to save comment.");
+                                }
+                              }}
+                            >
+                              Save
+                            </Button>
+                          </div>
+                        </TableCell>
                         <TableCell className="text-xs text-right">{formatINR(tx.amount)}</TableCell>
                         <TableCell className="text-xs">{SPLIT_STATUS_LABELS[tx.splitStatus || "none"]}</TableCell>
                         <TableCell>
@@ -1522,6 +1644,7 @@ export default function ImportPage() {
                 <Input placeholder="date (required)" value={manualTx.date} onChange={(e) => setManualTx((prev) => ({ ...prev, date: e.target.value }))} />
 
                 <Input placeholder="narration (required)" value={manualTx.narration} onChange={(e) => setManualTx((prev) => ({ ...prev, narration: e.target.value }))} className="md:col-span-3" />
+                <Input placeholder="comment (optional)" value={manualTx.comment} onChange={(e) => setManualTx((prev) => ({ ...prev, comment: e.target.value }))} className="md:col-span-3" />
                 <Input type="number" placeholder="amount (required)" value={manualTx.amount} onChange={(e) => setManualTx((prev) => ({ ...prev, amount: e.target.value }))} />
                 <Input type="number" placeholder="confidence (optional)" value={manualTx.confidence} onChange={(e) => setManualTx((prev) => ({ ...prev, confidence: e.target.value }))} />
                 <Input type="number" placeholder="closing balance (optional)" value={manualTx.closingBalance} onChange={(e) => setManualTx((prev) => ({ ...prev, closingBalance: e.target.value }))} />

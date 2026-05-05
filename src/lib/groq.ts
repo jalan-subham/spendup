@@ -36,7 +36,8 @@ Transport hard rule:
 - For debit/outgoing transactions with UPI payment pattern and amount between INR 150 and INR 250 (inclusive), if narration/purpose is unclear or generic, prefer transactionType="spend" and category="Transport".
 - Do not default these cases to "Other" unless there is clear conflicting evidence.
 
-For income/investment/transfer/cc_settlement/refund, return category as the type name with title case (e.g. "Income", "Investment", "Transfer", "CC Settlement", "Refund").
+For income/investment/transfer/cc_settlement, return category as the type name with title case (e.g. "Income", "Investment", "Transfer", "CC Settlement").
+For refund: use category="Cashback" when narration clearly indicates cashback/reward points credit, otherwise category="Refund".
 Extract the payment method from the narration if possible (e.g. "UPI-...", "POS...", "NEFT", "IMPS"). Default to "Other" if unclear.
 
 Return a JSON array only. No markdown, no explanation. Each element:
