@@ -35,11 +35,13 @@ export function getRecentDbQueries(limit = 30) {
   return buffer.slice(-size).reverse();
 }
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+type PrismaQueryClient = PrismaClient<Prisma.PrismaClientOptions, "query">;
+
+const globalForPrisma = globalThis as unknown as { prisma: PrismaQueryClient };
 
 export const prisma =
   globalForPrisma.prisma ??
-  new PrismaClient({
+  new PrismaClient<Prisma.PrismaClientOptions, "query">({
     log:
       process.env.NODE_ENV === "development"
         ? [{ emit: "event", level: "query" }, "error", "warn"]
