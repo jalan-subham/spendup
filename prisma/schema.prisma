@@ -19,6 +19,7 @@ model User {
   banks        Bank[]
   transactions    Transaction[]
   creditCardBills CreditCardBill[]
+  balanceSnapshots BankBalanceSnapshot[]
 }
 
 // ─── Bank & Card ─────────────────────────────────────────────────────────────
@@ -33,6 +34,22 @@ model Bank {
   createdAt      DateTime @default(now())
   cards          Card[]
   transactions   Transaction[]
+  balanceSnapshots BankBalanceSnapshot[]
+}
+
+// ─── Balance snapshots ──────────────────────────────────────────────────────
+
+model BankBalanceSnapshot {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankId         String
+  bank           Bank     @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  asOfDate       String
+  closingBalance Float
+  createdAt      DateTime @default(now())
+
+  @@index([userId, bankId, asOfDate])
 }
 
 model Card {

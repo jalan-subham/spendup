@@ -1,7 +1,7 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
-import type { Transaction } from "@/lib/types";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import type { BankBalanceSnapshot, Transaction } from "@/lib/types";
 import { useAccounts, useTransactions } from "@/lib/store";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -65,6 +65,19 @@ function formatShortDate(s: string): string {
   return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" }).format(ts);
 }
 
+function monthRange(ym: string): { from: string; to: string } | null {
+  const match = ym.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  if (!year || !month) return null;
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
+  const from = start.toISOString().slice(0, 10);
+  const to = end.toISOString().slice(0, 10);
+  return { from, to };
+}
+
 // Sanity check helpers
 const ALLOWED_POSITIVE = new Set(["income", "refund", "refund_settlement", "transfer_in"]);
 const ALLOWED_NEGATIVE = new Set(["spend", "transfer_out", "investment", "cc_settlement", "income_debit"]);
@@ -72,9 +85,19 @@ const ALLOWED_NEGATIVE = new Set(["spend", "transfer_out", "investment", "cc_set
 export default function Home() {
   const { banks, loaded: accountsLoaded } = useAccounts();
   const { transactions, loaded: transactionsLoaded } = useTransactions();
+  const [snapshots, setSnapshots] = useState<BankBalanceSnapshot[]>([]);
+  const [snapshotsLoaded, setSnapshotsLoaded] = useState(false);
   const [recentSearch, setRecentSearch] = useState("");
   const deferredSearch = useDeferredValue(recentSearch);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/balance-snapshots")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((rows: BankBalanceSnapshot[]) => setSnapshots(Array.isArray(rows) ? rows : []))
+      .catch(() => setSnapshots([]))
+      .finally(() => setSnapshotsLoaded(true));
+  }, []);
 
   // Month picker - default to current month
   const allMonths = useMemo(() => {
@@ -95,6 +118,12 @@ export default function Home() {
   const goPrev = () => canPrev && setSelectedMonth(allMonths[monthIdx - 1]);
   const goNext = () => canNext && setSelectedMonth(allMonths[monthIdx + 1]);
   const isAllTime = activeMonth === "all";
+  const activeMonthRange = !isAllTime ? monthRange(activeMonth) : null;
+  const openMonthTransactions = () => {
+    if (!activeMonthRange) return;
+    const params = new URLSearchParams({ from: activeMonthRange.from, to: activeMonthRange.to });
+    window.open(`/month-transactions?${params.toString()}`, "_blank", "noopener,noreferrer");
+  };
 
   const monthTxns = useMemo(() => {
     if (isAllTime) return transactions.filter((t) => t.transactionType !== "excluded");
@@ -216,19 +245,37 @@ export default function Home() {
         latestByBank.set(tx.bankId, tx);
       }
     }
+
+    const latestSnapshotByBank = new Map<string, BankBalanceSnapshot>();
+    for (const snap of snapshots) {
+      const existing = latestSnapshotByBank.get(snap.bankId);
+      if (!existing) {
+        latestSnapshotByBank.set(snap.bankId, snap);
+        continue;
+      }
+      const snapTs = parseTxnDate(snap.asOfDate);
+      const existingTs = parseTxnDate(existing.asOfDate);
+      if (snapTs > existingTs) {
+        latestSnapshotByBank.set(snap.bankId, snap);
+      } else if (snapTs === existingTs && snap.createdAt > existing.createdAt) {
+        latestSnapshotByBank.set(snap.bankId, snap);
+      }
+    }
+
     return banks.map((bank) => {
+      const latestSnapshot = latestSnapshotByBank.get(bank.id);
       const latest = latestByBank.get(bank.id);
       return {
         bankId: bank.id,
         bankName: bank.name,
         bankColor: bank.color,
-        closingBalance: latest?.closingBalance,
-        asOfDate: latest?.date,
+        closingBalance: latestSnapshot?.closingBalance ?? latest?.closingBalance,
+        asOfDate: latestSnapshot?.asOfDate ?? latest?.date,
       };
     });
-  }, [banks, transactions]);
+  }, [banks, transactions, snapshots]);
 
-  if (!transactionsLoaded || !accountsLoaded) {
+  if (!transactionsLoaded || !accountsLoaded || !snapshotsLoaded) {
     return <div className="p-8 text-sm text-muted-foreground">Loading dashboard...</div>;
   }
 
@@ -253,6 +300,15 @@ export default function Home() {
             </button>
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={goNext} disabled={!canNext || isAllTime}>
               <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              disabled={!activeMonthRange}
+              onClick={openMonthTransactions}
+            >
+              View Month Transactions
             </Button>
           </div>
         </div>

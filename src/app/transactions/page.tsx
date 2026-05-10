@@ -27,6 +27,17 @@ function formatINR(n: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Math.abs(n));
 }
 
+function parseStatementDate(s: string) {
+  if (!s) return 0;
+  const slash = s.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);
+  if (slash) {
+    const [, d, m, yRaw] = slash;
+    const year = yRaw.length === 2 ? 2000 + parseInt(yRaw, 10) : parseInt(yRaw, 10);
+    return new Date(year, parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
+  }
+  return 0;
+}
+
 function isNarrationUnclearForPurpose(narration: string) {
   const text = narration.toLowerCase().trim();
   if (!text) return true;
@@ -1102,6 +1113,11 @@ export default function ImportPage() {
   const transportMetaSelected = selectedMetaIds.includes("transport_upi_150_250");
 
   const [saved, setSaved] = useState(false);
+  const [snapshotDialogOpen, setSnapshotDialogOpen] = useState(false);
+  const [snapshotClosingBalance, setSnapshotClosingBalance] = useState("");
+  const [snapshotAsOfDate, setSnapshotAsOfDate] = useState("");
+  const [snapshotError, setSnapshotError] = useState("");
+  const [snapshotSaving, setSnapshotSaving] = useState(false);
   const [ledgerTransactions, setLedgerTransactions] = useState<Transaction[]>([]);
   const [trackerLoading, setTrackerLoading] = useState(false);
   const [trackerError, setTrackerError] = useState("");
@@ -1149,6 +1165,27 @@ export default function ImportPage() {
     if (!res.ok) throw new Error("Failed to persist transactions");
     return res.json();
   }
+
+  const persistLedgerSave = async () => {
+    try {
+      await saveTransactions(transactions);
+      setSaved(true);
+    } catch (e) {
+      alert("Save failed: " + (e instanceof Error ? e.message : String(e)));
+      return;
+    }
+
+    setStep(1);
+    setMeta(null);
+    setRawRows([]);
+    setTransactions([]);
+    setSources([]);
+    setUploadKind("");
+    setSelectedCcBillId("");
+    setSelectedMetaIds([]);
+    setClassifyProgress(0);
+    setDuplicates([]);
+  };
 
   const loadLedgerTransactions = useCallback(async () => {
     setTrackerLoading(true);
@@ -1386,23 +1423,64 @@ export default function ImportPage() {
     setTransactions(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t));
 
   const handleConfirm = async () => {
-    try {
-      await saveTransactions(transactions);
-      setSaved(true);
-    } catch (e) {
-      alert("Save failed: " + (e instanceof Error ? e.message : String(e)));
+    const source = sources[0];
+    const shouldAskSnapshot = !!meta && source?.statementType === "bank_account" && !!source.bankId;
+
+    if (shouldAskSnapshot) {
+      const lastDate = snapshotLastDate;
+      const lastDateRows = snapshotLastDateRows;
+      const lastRow = lastDateRows.length > 0 ? lastDateRows[lastDateRows.length - 1] : undefined;
+      const defaultClosing = lastRow?.closingBalance ?? meta?.closingBalance;
+      setSnapshotClosingBalance(defaultClosing != null ? String(defaultClosing) : "");
+      setSnapshotAsOfDate(lastRow?.date || lastDate || meta?.endDate || "");
+      setSnapshotError("");
+      setSnapshotDialogOpen(true);
       return;
     }
-    setStep(1);
-    setMeta(null);
-    setRawRows([]);
-    setTransactions([]);
-    setSources([]);
-    setUploadKind("");
-    setSelectedCcBillId("");
-    setSelectedMetaIds([]);
-    setClassifyProgress(0);
-    setDuplicates([]);
+
+    await persistLedgerSave();
+  };
+
+  const confirmSnapshotAndSave = async (skipSnapshot: boolean) => {
+    if (!skipSnapshot) {
+      const closing = snapshotClosingBalance.trim() ? Number(snapshotClosingBalance) : NaN;
+      if (!Number.isFinite(closing)) {
+        setSnapshotError("Closing balance must be a valid number.");
+        return;
+      }
+
+      if (!sources[0]?.bankId || !snapshotAsOfDate.trim()) {
+        setSnapshotError("Missing bank or date for the snapshot.");
+        return;
+      }
+
+      setSnapshotSaving(true);
+      setSnapshotError("");
+      try {
+        const res = await fetch("/api/balance-snapshots", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bankId: sources[0].bankId,
+            asOfDate: snapshotAsOfDate.trim(),
+            closingBalance: closing,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data?.error || "Failed to save snapshot");
+        }
+      } catch (e) {
+        setSnapshotError(e instanceof Error ? e.message : "Failed to save snapshot");
+        setSnapshotSaving(false);
+        return;
+      }
+      setSnapshotSaving(false);
+    }
+
+    setSnapshotDialogOpen(false);
+    await persistLedgerSave();
   };
 
   const toggleMeta = (metaId: string) => {
@@ -1441,6 +1519,22 @@ export default function ImportPage() {
   const splitTrackerPending = splitTracked
     .filter((tx) => tx.splitStatus === "to_split" || tx.splitStatus === "splitwise_logged")
     .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+
+  const snapshotBankName = sources[0]?.bankId
+    ? banks.find((bank) => bank.id === sources[0]?.bankId)?.name
+    : undefined;
+  const snapshotLastDate = useMemo(() => {
+    if (!rawRows.length) return "";
+    return rawRows.reduce((latest, row) => {
+      if (!latest) return row.date;
+      return parseStatementDate(row.date) > parseStatementDate(latest) ? row.date : latest;
+    }, "");
+  }, [rawRows]);
+
+  const snapshotLastDateRows = useMemo(() => {
+    if (!snapshotLastDate) return [] as HdfcRawRow[];
+    return rawRows.filter((row) => row.date === snapshotLastDate && row.closingBalance != null);
+  }, [rawRows, snapshotLastDate]);
 
   return (
     <div className="p-8 space-y-6 max-w-[1300px]">
@@ -1496,6 +1590,101 @@ export default function ImportPage() {
           )}
           {step === 3 && <Step3Classify progress={classifyProgress} total={classifyTotal} current={classifyLabel} />}
           {step === 4 && <Step4Review bills={bills} banks={banks} transactions={transactions} onUpdate={updateTx} onBillCreated={handleBillCreated} onNext={handleConfirm} />}
+
+          <Dialog open={snapshotDialogOpen} onOpenChange={setSnapshotDialogOpen}>
+            <DialogContent className="sm:max-w-[520px]">
+              <DialogHeader>
+                <DialogTitle>Confirm Balance Snapshot</DialogTitle>
+                <DialogDescription>
+                  We use this closing balance snapshot for the dashboard. Verify or adjust before saving.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-1">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <p className="text-[10px] text-muted-foreground">Bank</p>
+                    <p className="text-sm font-semibold">{snapshotBankName ?? "Selected bank"}</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <p className="text-[10px] text-muted-foreground">As of Date</p>
+                    <p className="text-sm font-semibold">{snapshotAsOfDate || "—"}</p>
+                  </div>
+                </div>
+
+                {snapshotLastDateRows.length > 0 && (
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <p className="text-xs font-semibold">Last Date Closing Balances ({snapshotLastDate})</p>
+                    <p className="text-[11px] text-muted-foreground mb-2">
+                      Pick the last transaction from the statement date.
+                    </p>
+                    <div className="space-y-2">
+                      {snapshotLastDateRows.map((row) => (
+                        <button
+                          key={row.refNo || row.narration}
+                          type="button"
+                          className={`w-full rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                            Number(snapshotClosingBalance) === row.closingBalance
+                              ? "border-primary bg-primary/10"
+                              : "border-border bg-background hover:bg-muted/40"
+                          }`}
+                          onClick={() => {
+                            setSnapshotClosingBalance(String(row.closingBalance));
+                            setSnapshotAsOfDate(row.date);
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="truncate">{row.narration || "(No narration)"}</span>
+                            <span className="font-semibold tabular-nums">{formatINR(row.closingBalance)}</span>
+                          </div>
+                          {row.refNo && <p className="mt-1 text-[10px] text-muted-foreground font-mono">{row.refNo}</p>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs font-medium mb-1">As of Date</p>
+                    <Input
+                      value={snapshotAsOfDate}
+                      onChange={(e) => setSnapshotAsOfDate(e.target.value)}
+                      className="h-9"
+                      placeholder="DD/MM/YY"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium mb-1">Closing Balance</p>
+                    <Input
+                      type="number"
+                      value={snapshotClosingBalance}
+                      onChange={(e) => setSnapshotClosingBalance(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                </div>
+
+                {snapshotError && (
+                  <p className="text-xs text-destructive">{snapshotError}</p>
+                )}
+              </div>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setSnapshotDialogOpen(false)} disabled={snapshotSaving}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => confirmSnapshotAndSave(true)}
+                  disabled={snapshotSaving}
+                >
+                  Save Without Snapshot
+                </Button>
+                <Button onClick={() => confirmSnapshotAndSave(false)} disabled={snapshotSaving}>
+                  {snapshotSaving ? "Saving…" : "Confirm & Save"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="split_tracker" className="space-y-4">

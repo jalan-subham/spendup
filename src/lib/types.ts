@@ -72,6 +72,16 @@ export interface Transaction {
   linkedBillId?: string;
 }
 
+// ─── Balance snapshot model ─────────────────────────────────────────────────
+
+export interface BankBalanceSnapshot {
+  id: string;
+  bankId: string;
+  asOfDate: string;
+  closingBalance: number;
+  createdAt: string;
+}
+
 // ─── Ingestion session ────────────────────────────────────────────────────────
 
 /** A record of one import run, stored for audit trail */
