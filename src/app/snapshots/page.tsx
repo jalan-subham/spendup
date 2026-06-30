@@ -173,7 +173,7 @@ export default function SnapshotsPage() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <label className="text-xs font-medium text-muted-foreground">Bank</label>
-              <Select value={bankId} onValueChange={setBankId}>
+              <Select value={bankId} onValueChange={(v) => setBankId(v ?? "")}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select a bank" />
                 </SelectTrigger>
@@ -253,7 +253,7 @@ export default function SnapshotsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-2">
-              <Select value={bankId} onValueChange={setBankId}>
+              <Select value={bankId} onValueChange={(v) => setBankId(v ?? "")}>
                 <SelectTrigger className="w-[220px]">
                   <SelectValue placeholder="Filter by bank" />
                 </SelectTrigger>

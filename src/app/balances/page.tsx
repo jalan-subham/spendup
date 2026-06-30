@@ -132,7 +132,7 @@ export default function BalanceFinderPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">Bank</label>
-                <Select value={selectedBankId} onValueChange={setSelectedBankId}>
+                <Select value={selectedBankId} onValueChange={(v) => setSelectedBankId(v ?? "")}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select a bank" />
                   </SelectTrigger>

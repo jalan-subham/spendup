@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useAccounts } from "@/lib/store";
 import type { HdfcRawRow, HdfcStatementMeta } from "@/lib/parsers/hdfc-text";
 import type { Transaction, StatementSource, StatementType, Category, PaymentMethod } from "@/lib/types";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import { useAccounts, useTransactions } from "@/lib/store";
@@ -33,7 +33,15 @@ function formatINR(amount: number) {
   }).format(Math.abs(amount));
 }
 
-export default function MonthTransactionsPage() {
+export default function MonthTransactionsPageWrapper() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-muted-foreground">Loading...</div>}>
+      <MonthTransactionsPage />
+    </Suspense>
+  );
+}
+
+function MonthTransactionsPage() {
   const searchParams = useSearchParams();
   const { banks } = useAccounts();
   const { transactions, loaded } = useTransactions();
