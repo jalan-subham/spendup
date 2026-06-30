@@ -1123,6 +1123,7 @@ export default function ImportPage() {
   const [trackerError, setTrackerError] = useState("");
   const [splitCommentDrafts, setSplitCommentDrafts] = useState<Record<string, string>>({});
   const [splitCommentSavingId, setSplitCommentSavingId] = useState<string>("");
+  const [splitStatusFilter, setSplitStatusFilter] = useState<"all" | NonNullable<Transaction["splitStatus"]>>("all");
   const [manualBusy, setManualBusy] = useState(false);
   const [manualMessage, setManualMessage] = useState("");
   const [manualTx, setManualTx] = useState({
@@ -1520,6 +1521,16 @@ export default function ImportPage() {
     .filter((tx) => tx.splitStatus === "to_split" || tx.splitStatus === "splitwise_logged")
     .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
 
+  const splitFilteredTracked = splitStatusFilter === "all"
+    ? splitTracked
+    : splitTracked.filter((tx) => tx.splitStatus === splitStatusFilter);
+
+  const splitStatusCounts = splitTracked.reduce((acc, tx) => {
+    const status = tx.splitStatus || "none";
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
   const snapshotBankName = sources[0]?.bankId
     ? banks.find((bank) => bank.id === sources[0]?.bankId)?.name
     : undefined;
@@ -1709,10 +1720,37 @@ export default function ImportPage() {
 
               {trackerError && <p className="text-xs text-destructive">{trackerError}</p>}
 
+              {!trackerLoading && splitTracked.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-[11px] text-muted-foreground mr-1">Filter:</p>
+                  <Button
+                    size="sm"
+                    variant={splitStatusFilter === "all" ? "default" : "outline"}
+                    className="h-7 text-[10px] px-3"
+                    onClick={() => setSplitStatusFilter("all")}
+                  >
+                    All ({splitTracked.length})
+                  </Button>
+                  {(["to_split", "splitwise_logged", "settled"] as const).map((status) => (
+                    <Button
+                      key={status}
+                      size="sm"
+                      variant={splitStatusFilter === status ? "default" : "outline"}
+                      className="h-7 text-[10px] px-3"
+                      onClick={() => setSplitStatusFilter(status)}
+                    >
+                      {SPLIT_STATUS_LABELS[status]} ({splitStatusCounts[status] || 0})
+                    </Button>
+                  ))}
+                </div>
+              )}
+
               {trackerLoading ? (
                 <p className="text-xs text-muted-foreground">Loading split tracker...</p>
               ) : splitTracked.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No split-tracked transactions yet.</p>
+              ) : splitFilteredTracked.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No transactions with status "{SPLIT_STATUS_LABELS[splitStatusFilter as keyof typeof SPLIT_STATUS_LABELS]}".</p>
               ) : (
                 <Table>
                   <TableHeader>
@@ -1726,7 +1764,7 @@ export default function ImportPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {splitTracked.map((tx) => (
+                    {splitFilteredTracked.map((tx) => (
                       <TableRow key={tx.id}>
                         <TableCell className="text-xs">{tx.date}</TableCell>
                         <TableCell className="text-xs max-w-[420px] truncate">{tx.narration}</TableCell>
