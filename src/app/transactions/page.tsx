@@ -1511,6 +1511,19 @@ export default function ImportPage() {
     }
   }, [activeTab, loadLedgerTransactions]);
 
+  const snapshotLastDate = useMemo(() => {
+    if (!rawRows.length) return "";
+    return rawRows.reduce((latest, row) => {
+      if (!latest) return row.date;
+      return parseStatementDate(row.date) > parseStatementDate(latest) ? row.date : latest;
+    }, "");
+  }, [rawRows]);
+
+  const snapshotLastDateRows = useMemo(() => {
+    if (!snapshotLastDate) return [] as HdfcRawRow[];
+    return rawRows.filter((row) => row.date === snapshotLastDate && row.closingBalance != null);
+  }, [rawRows, snapshotLastDate]);
+
   if (!loaded) return null;
 
   const splitTracked = ledgerTransactions
@@ -1534,18 +1547,6 @@ export default function ImportPage() {
   const snapshotBankName = sources[0]?.bankId
     ? banks.find((bank) => bank.id === sources[0]?.bankId)?.name
     : undefined;
-  const snapshotLastDate = useMemo(() => {
-    if (!rawRows.length) return "";
-    return rawRows.reduce((latest, row) => {
-      if (!latest) return row.date;
-      return parseStatementDate(row.date) > parseStatementDate(latest) ? row.date : latest;
-    }, "");
-  }, [rawRows]);
-
-  const snapshotLastDateRows = useMemo(() => {
-    if (!snapshotLastDate) return [] as HdfcRawRow[];
-    return rawRows.filter((row) => row.date === snapshotLastDate && row.closingBalance != null);
-  }, [rawRows, snapshotLastDate]);
 
   return (
     <div className="p-8 space-y-6 max-w-[1300px]">
