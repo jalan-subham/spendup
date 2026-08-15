@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, ReceiptText, Settings, Upload, LogOut, Sun, Moon, CreditCard, ShieldCheck, Landmark, Layers } from "lucide-react";
+import { LayoutDashboard, ReceiptText, Settings, Upload, LogOut, Sun, Moon, CreditCard, ShieldCheck, Landmark, Layers, FileText } from "lucide-react";
 import { useTheme } from "next-themes";
 
 const navItems = [
@@ -14,6 +14,7 @@ const navItems = [
   { name: "Sanity", href: "/sanity", icon: ShieldCheck },
   { name: "Balances", href: "/balances", icon: Landmark },
   { name: "Snapshots", href: "/snapshots", icon: Layers },
+  { name: "Files", href: "/files", icon: FileText },
 ];
 
 const bottomItems = [
