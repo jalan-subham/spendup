@@ -20,6 +20,22 @@ model User {
   transactions    Transaction[]
   creditCardBills CreditCardBill[]
   balanceSnapshots BankBalanceSnapshot[]
+  files        UserFile[]
+}
+
+// ─── User files ─────────────────────────────────────────────────────────────
+
+model UserFile {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  mimeType  String
+  size      Int
+  content   Bytes
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 // ─── Bank & Card ─────────────────────────────────────────────────────────────
