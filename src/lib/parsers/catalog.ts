@@ -7,6 +7,8 @@ export interface ParserCatalogItem {
   supportedExtensions: string[];
   supportedMimeTypes: string[];
   acceptsPassword: boolean;
+  bankKeyword: "hdfc" | "icici";
+  statementType: "bank_account" | "credit_card";
 }
 
 export const PARSER_CATALOG: ParserCatalogItem[] = [
@@ -17,6 +19,8 @@ export const PARSER_CATALOG: ParserCatalogItem[] = [
     supportedExtensions: [".txt", ".text"],
     supportedMimeTypes: ["text/plain"],
     acceptsPassword: false,
+    bankKeyword: "hdfc",
+    statementType: "bank_account",
   },
   {
     id: "icici_xls",
@@ -28,6 +32,8 @@ export const PARSER_CATALOG: ParserCatalogItem[] = [
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ],
     acceptsPassword: false,
+    bankKeyword: "icici",
+    statementType: "bank_account",
   },
   {
     id: "hdfc_swiggy_cc_pdf",
@@ -36,9 +42,12 @@ export const PARSER_CATALOG: ParserCatalogItem[] = [
     supportedExtensions: [".pdf"],
     supportedMimeTypes: ["application/pdf"],
     acceptsPassword: true,
+    bankKeyword: "hdfc",
+    statementType: "credit_card",
   },
 ];
 
 export function getParserCatalogItem(parserId: string): ParserCatalogItem | undefined {
   return PARSER_CATALOG.find((parser) => parser.id === parserId);
 }
+

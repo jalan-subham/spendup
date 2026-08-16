@@ -134,6 +134,7 @@ function Step1Upload({
 
   const selectedNonCcBank = banks.find((bank) => bank.id === nonCcBankId);
   const selectedCcBank = banks.find((bank) => bank.id === ccBankId);
+  const selectedBank = uploadKind === "cc" ? selectedCcBank : uploadKind === "non_cc" ? selectedNonCcBank : null;
   const ccCards = (selectedCcBank?.cards ?? []).filter((card) => card.type === "credit");
   const nonCcCards = (selectedNonCcBank?.cards ?? []).filter((card) => card.type !== "credit");
 
@@ -141,6 +142,34 @@ function Step1Upload({
   const previouslyImportedCycles = billsForCard.filter((bill) =>
     (bill.transactions ?? []).some((tx) => tx.statementType === "credit_card")
   );
+
+  const availableParsers = useMemo(() => {
+    if (!selectedBank) return [];
+    const bankNameLower = selectedBank.name.toLowerCase();
+    const isHdfc = bankNameLower.includes("hdfc");
+    const isIcici = bankNameLower.includes("icici");
+
+    return PARSER_CATALOG.filter((parser) => {
+      // Bank matching
+      if (parser.bankKeyword === "hdfc" && !isHdfc) return false;
+      if (parser.bankKeyword === "icici" && !isIcici) return false;
+      // Flow / statement type matching
+      if (uploadKind === "cc" && parser.statementType !== "credit_card") return false;
+      if (uploadKind === "non_cc" && parser.statementType !== "bank_account") return false;
+      return true;
+    });
+  }, [uploadKind, selectedBank]);
+
+  // Auto-select or reset parser when available parsers change
+  useEffect(() => {
+    if (availableParsers.length === 1) {
+      if (parserId !== availableParsers[0].id) {
+        setParserId(availableParsers[0].id);
+      }
+    } else if (parserId && !availableParsers.some((p) => p.id === parserId)) {
+      setParserId("" as ParserId);
+    }
+  }, [availableParsers, parserId, setParserId]);
 
   useEffect(() => {
     setSources([]);
@@ -401,14 +430,26 @@ function Step1Upload({
             <div className="space-y-4">
               <div className="w-full max-w-sm" onClick={e => e.stopPropagation()}>
                 <p className="text-left text-xs font-semibold text-muted-foreground mb-1">Parser</p>
-                <Select value={parserId} onValueChange={(v) => v && setParserId(v as ParserId)}>
+                <Select
+                  value={parserId}
+                  onValueChange={(v) => v && setParserId(v as ParserId)}
+                  disabled={availableParsers.length === 0}
+                >
                   <SelectTrigger className="h-9 text-xs bg-background">
-                    <SelectValue placeholder="Choose parser">
+                    <SelectValue placeholder={
+                      !uploadKind
+                        ? "Select upload type first"
+                        : !selectedBank
+                        ? "Select bank first"
+                        : availableParsers.length === 0
+                        ? "No parser for selected bank"
+                        : "Choose parser"
+                    }>
                       {activeParser?.label}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {PARSER_CATALOG.map((parser) => (
+                    {availableParsers.map((parser) => (
                       <SelectItem key={parser.id} value={parser.id} className="text-xs">
                         {parser.label}
                       </SelectItem>

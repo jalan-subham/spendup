@@ -54,3 +54,7 @@ src/generated/prisma/
 # Statements and raw uploads
 *.csv
 *.txt
+*.pdf
+
+# Local analysis scripts
+/scripts/

@@ -216,6 +216,19 @@ export function parseHdfcText(raw: string): HdfcParsedStatement {
     });
   }
 
+  // 6. Deduplicate refNos — some special transactions (POS reversals,
+  //    interest entries, etc.) share a generic refNo like "000000000000000".
+  //    Append "-2", "-3", … to subsequent duplicates so the DB unique
+  //    constraint on (userId, refNo) won't reject them.
+  const refCount = new Map<string, number>();
+  for (const row of rows) {
+    const count = (refCount.get(row.refNo) ?? 0) + 1;
+    refCount.set(row.refNo, count);
+    if (count > 1) {
+      row.refNo = `${row.refNo}-${count}`;
+    }
+  }
+
   return { meta, rows };
 }
 
