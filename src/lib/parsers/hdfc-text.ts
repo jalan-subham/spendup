@@ -203,8 +203,6 @@ export function parseHdfcText(raw: string): HdfcParsedStatement {
     const narration = [parsed.narrationPart, ...continuationParts]
       .join(" ")
       .replace(/\s+/g, " ")
-      .trim();
-
     rows.push({
       date: parsed.date,
       narration,
@@ -216,10 +214,24 @@ export function parseHdfcText(raw: string): HdfcParsedStatement {
     });
   }
 
-  // 6. Deduplicate refNos — some special transactions (POS reversals,
-  //    interest entries, etc.) share a generic refNo like "000000000000000".
-  //    Append "-2", "-3", … to subsequent duplicates so the DB unique
-  //    constraint on (userId, refNo) won't reject them.
+  // 6. Handle placeholder/generic refNos (e.g. "000000000000000" used for Interest, POS reversals, etc.)
+  //    Generate a deterministic unique refNo using date, amount, closingBalance, and narration
+  //    so they don't collide with generic entries from other statements or dates.
+  for (const row of rows) {
+    if (!row.refNo || /^0+$/.test(row.refNo.trim())) {
+      const canonical = `${row.date}|${row.withdrawal ?? 0}|${row.deposit ?? 0}|${row.closingBalance}|${row.narration.toLowerCase()}`;
+      let hash = 0;
+      for (let i = 0; i < canonical.length; i++) {
+        hash = ((hash << 5) - hash) + canonical.charCodeAt(i);
+        hash |= 0;
+      }
+      const hashStr = Math.abs(hash).toString(36);
+      const cleanDate = row.date.replace(/[^0-9]/g, "");
+      row.refNo = `HDFC-ZR-${cleanDate}-${hashStr}`;
+    }
+  }
+
+  // Deduplicate any remaining duplicate refNos within this batch
   const refCount = new Map<string, number>();
   for (const row of rows) {
     const count = (refCount.get(row.refNo) ?? 0) + 1;
