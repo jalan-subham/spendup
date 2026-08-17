@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useAccounts } from "@/lib/store";
 import type { HdfcRawRow, HdfcStatementMeta } from "@/lib/parsers/hdfc-text";
-import type { Transaction, StatementSource, StatementType, Category, PaymentMethod } from "@/lib/types";
+import type { Transaction, StatementSource, StatementType, Category, PaymentMethod, SplitStatus } from "@/lib/types";
 import { CATEGORIES } from "@/lib/types";
 import { PARSER_CATALOG, type ParserId } from "@/lib/parsers/catalog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,8 +17,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   FileUp, CheckCircle2, Loader2, AlertTriangle, ArrowUpRight, ArrowDownRight,
   Scissors, Building2, ChevronRight, Search, RefreshCw,
-  Info, AlertCircle, Lock, CreditCard, Landmark
+  Info, AlertCircle, Lock, CreditCard, Landmark, Copy, Check, Sparkles
 } from "lucide-react";
+import {
+  buildFullClassificationPrompt,
+  parseClassifiedJson,
+  type ClassifiedRow,
+} from "@/lib/classification-prompt";
 import Link from "next/link";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -549,13 +554,22 @@ const CLASSIFICATION_METAS = [
   },
 ] as const;
 
-function Step2Validate({ meta, rowCount, duplicates, selectedMetaIds, onToggleMeta, onConfirm }: {
+function Step2Validate({
+  meta,
+  rowCount,
+  duplicates,
+  selectedMetaIds,
+  onToggleMeta,
+  onConfirm,
+  onOpenPromptMode,
+}: {
   meta: HdfcStatementMeta;
   rowCount: number;
   duplicates: string[];
   selectedMetaIds: string[];
   onToggleMeta: (metaId: string) => void;
   onConfirm: () => void;
+  onOpenPromptMode: () => void;
 }) {
   const expectedTotal = meta.drCount + meta.crCount;
   const countMatch = rowCount === expectedTotal;
@@ -642,9 +656,15 @@ function Step2Validate({ meta, rowCount, duplicates, selectedMetaIds, onToggleMe
             </div>
           </div>
 
-          <Button onClick={onConfirm} className="gap-2">
-            Looks good — Classify with AI <ChevronRight className="h-4 w-4" />
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={onConfirm} className="gap-2">
+              Looks good — Classify with AI <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" onClick={onOpenPromptMode} className="gap-2 border-purple-200 text-purple-700 hover:bg-purple-50">
+              <Sparkles className="h-4 w-4 text-purple-600" />
+              Prompt Output Mode (Copy / Paste LLM)
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>
@@ -653,7 +673,17 @@ function Step2Validate({ meta, rowCount, duplicates, selectedMetaIds, onToggleMe
 
 // ─── Step 3: Classify (progress) ─────────────────────────────────────────────
 
-function Step3Classify({ progress, total, current }: { progress: number; total: number; current: string }) {
+function Step3Classify({
+  progress,
+  total,
+  current,
+  onOpenPromptMode,
+}: {
+  progress: number;
+  total: number;
+  current: string;
+  onOpenPromptMode?: () => void;
+}) {
   return (
     <Card>
       <CardContent className="flex flex-col items-center justify-center py-16 text-center space-y-5">
@@ -668,8 +698,152 @@ function Step3Classify({ progress, total, current }: { progress: number; total: 
           <Progress value={(progress / total) * 100} className="h-1.5" />
           <p className="text-xs text-muted-foreground">{progress} / {total} rows</p>
         </div>
+        {onOpenPromptMode && (
+          <div className="pt-2">
+            <Button variant="ghost" size="sm" onClick={onOpenPromptMode} className="text-xs text-muted-foreground hover:text-purple-600 gap-1.5">
+              <Sparkles className="h-3.5 w-3.5" />
+              Rate limit or want to use your own LLM? Switch to Prompt Mode →
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+// ─── Prompt Output Mode Dialog ───────────────────────────────────────────────
+
+function PromptModeDialog({
+  open,
+  onOpenChange,
+  promptText,
+  rawRowsCount,
+  onApplyClassification,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  promptText: string;
+  rawRowsCount: number;
+  onApplyClassification: (classified: ClassifiedRow[]) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [pasted, setPasted] = useState("");
+  const [parseResult, setParseResult] = useState<{ success: boolean; data: ClassifiedRow[]; error?: string } | null>(null);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Fallback in case clipboard permissions are restricted
+    }
+  };
+
+  const handlePastedChange = (val: string) => {
+    setPasted(val);
+    if (!val.trim()) {
+      setParseResult(null);
+      return;
+    }
+    const res = parseClassifiedJson(val);
+    setParseResult(res);
+  };
+
+  const handleApply = () => {
+    if (!parseResult || !parseResult.success || parseResult.data.length === 0) return;
+    onApplyClassification(parseResult.data);
+    onOpenChange(false);
+    setPasted("");
+    setParseResult(null);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-6 overflow-hidden">
+        <DialogHeader className="pb-2 border-b">
+          <DialogTitle className="flex items-center gap-2 text-base font-bold text-foreground">
+            <Sparkles className="h-5 w-5 text-purple-600" />
+            Prompt Output Mode (External LLM Classification)
+          </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            Copy the pre-structured prompt into ChatGPT, Claude, DeepSeek, Gemini, or a local model, then paste the returned JSON array below to apply classifications.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto space-y-5 py-3 pr-1">
+          {/* Step 1: Copy Prompt */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-100 text-purple-700 text-[10px] font-bold">1</span>
+                Copy Prompt for LLM ({rawRowsCount} transactions)
+              </label>
+              <Button size="sm" variant={copied ? "secondary" : "outline"} onClick={handleCopy} className="h-7 text-xs gap-1.5">
+                {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? "Copied to Clipboard!" : "Copy Prompt"}
+              </Button>
+            </div>
+            <textarea
+              readOnly
+              value={promptText}
+              rows={6}
+              className="w-full text-xs font-mono bg-muted/40 border rounded-md p-3 select-all focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+            />
+          </div>
+
+          {/* Step 2: Paste Output */}
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-100 text-purple-700 text-[10px] font-bold">2</span>
+              Paste LLM Response (JSON Array)
+            </label>
+            <textarea
+              placeholder={`Paste the JSON output from your LLM here (e.g. [\n  { "refNo": "...", "transactionType": "spend", "category": "Food", "paymentMethod": "UPI", "confidence": 0.95 }\n])`}
+              value={pasted}
+              onChange={(e) => handlePastedChange(e.target.value)}
+              rows={7}
+              className="w-full text-xs font-mono bg-background border rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+            />
+
+            {/* Validation Feedback */}
+            {parseResult && (
+              <div>
+                {parseResult.success ? (
+                  <div className="rounded-md bg-emerald-50 border border-emerald-200 p-2.5 flex items-center gap-2 text-xs text-emerald-700">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span>
+                      <strong>Valid JSON!</strong> Parsed <strong>{parseResult.data.length}</strong> classified transaction entries.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="rounded-md bg-destructive/10 border border-destructive/20 p-2.5 flex items-center gap-2 text-xs text-destructive">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <span>
+                      <strong>JSON Syntax Issue:</strong> {parseResult.error}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="pt-3 border-t flex items-center justify-between sm:justify-between">
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleApply}
+            disabled={!parseResult?.success || parseResult.data.length === 0}
+            className="gap-2"
+          >
+            Apply Classification & Review <ChevronRight className="h-4 w-4" />
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1151,6 +1325,7 @@ export default function ImportPage() {
   const [classifyTotal, setClassifyTotal] = useState(0);
   const [classifyLabel, setClassifyLabel] = useState("");
   const [selectedMetaIds, setSelectedMetaIds] = useState<string[]>([]);
+  const [promptDialogOpen, setPromptDialogOpen] = useState(false);
   const transportMetaSelected = selectedMetaIds.includes("transport_upi_150_250");
 
   const [saved, setSaved] = useState(false);
@@ -1352,9 +1527,102 @@ export default function ImportPage() {
     setStep(2);
   };
 
+  const currentDedupedRows = useMemo(() => {
+    return rawRows.filter(r => !duplicates.includes(r.refNo));
+  }, [rawRows, duplicates]);
+
+  const fullPromptText = useMemo(() => {
+    const selectedMetaHints = CLASSIFICATION_METAS
+      .filter((metaItem) => selectedMetaIds.includes(metaItem.id))
+      .map((metaItem) => metaItem.hint);
+    return buildFullClassificationPrompt(currentDedupedRows, selectedMetaHints);
+  }, [currentDedupedRows, selectedMetaIds]);
+
+  const mapClassifiedToTransactions = useCallback((deduped: HdfcRawRow[], classified: ClassifiedRow[]): Transaction[] => {
+    const classMap = new Map(classified.map(c => [c.refNo, c]));
+    const source = sources[0];
+    const sourceBankId = source?.bankId;
+    const validCards = banks.find(b => b.id === sourceBankId)?.cards || [];
+
+    return deduped.map((row, idx) => {
+      const cls = classMap.get(row.refNo);
+      const inferredPayment = (cls?.paymentMethod ?? "").toLowerCase();
+
+      let aiCardId: string | undefined = source?.cardId;
+      if (source?.statementType === "bank_account" && inferredPayment) {
+        // Attempt to find a non-CC card matching "upi" or "debit"
+        const match = validCards.find(c => c.type !== "credit" && (c.type === inferredPayment.split(" ")[0] || c.nickname.toLowerCase().includes(inferredPayment)));
+        if (match) aiCardId = match.id;
+      }
+
+      if (source?.statementType === "bank_account" && !inferredPayment) {
+        aiCardId = undefined;
+      }
+
+      const isDebit = row.withdrawal != null;
+      const amt = isDebit ? -(row.withdrawal ?? 0) : (row.deposit ?? 0);
+      const amountAbs = Math.abs(amt);
+      const narration = row.narration ?? "";
+      const narrationLower = narration.toLowerCase();
+      const hasUpiSignal =
+        inferredPayment.includes("upi") ||
+        /\bupi\b/.test(narrationLower) ||
+        /@[a-z]/.test(narrationLower);
+      const lowSignalCategory = !cls?.category || cls.category === "Other";
+      const shouldForceTransport =
+        transportMetaSelected &&
+        isDebit &&
+        amountAbs >= 150 &&
+        amountAbs <= 250 &&
+        hasUpiSignal &&
+        isNarrationUnclearForPurpose(narration) &&
+        lowSignalCategory;
+
+      const finalCategory = shouldForceTransport
+        ? "Transport"
+        : (cls?.category as Category ?? "Other");
+      const finalType = shouldForceTransport
+        ? "spend"
+        : (cls?.transactionType ?? (isDebit ? "spend" : "income"));
+      const finalPaymentMethod = source?.statementType === "credit_card"
+        ? "Credit Card"
+        : shouldForceTransport
+          ? "UPI"
+          : (cls?.paymentMethod ?? "Other");
+      const finalConfidence = shouldForceTransport
+        ? Math.max(cls?.confidence ?? 0, 0.8)
+        : cls?.confidence;
+
+      return {
+        id: `${row.refNo || idx}-${Date.now()}`,
+        refNo: row.refNo,
+        date: row.date,
+        narration: row.narration,
+        amount: amt,
+        category: finalCategory as Category,
+        paymentMethod: finalPaymentMethod as PaymentMethod,
+        transactionType: finalType as Transaction["transactionType"],
+        confidence: finalConfidence,
+        annotated: (finalConfidence ?? 0) >= 0.75,
+        splitStatus: "none" as SplitStatus,
+        bankId: sourceBankId,
+        cardId: source?.statementType === "bank_account" ? aiCardId : source?.cardId,
+        statementType: source?.statementType,
+        linkedBillId: source?.statementType === "credit_card" ? (selectedCcBillId || undefined) : undefined,
+        closingBalance: row.closingBalance,
+      };
+    });
+  }, [sources, banks, transportMetaSelected, selectedCcBillId]);
+
+  const handleApplyPromptClassification = useCallback((classified: ClassifiedRow[]) => {
+    const txs = mapClassifiedToTransactions(currentDedupedRows, classified);
+    setTransactions(txs);
+    setStep(4);
+  }, [currentDedupedRows, mapClassifiedToTransactions]);
+
   const handleValidated = async () => {
     setStep(3);
-    const deduped = rawRows.filter(r => !duplicates.includes(r.refNo));
+    const deduped = currentDedupedRows;
     setClassifyTotal(deduped.length);
     setClassifyProgress(0);
     setClassifyLabel("Starting classification…");
@@ -1376,83 +1644,8 @@ export default function ImportPage() {
 
       if (!res.ok) throw new Error(data.error ?? "Classification failed");
 
-      const classified: { refNo: string; transactionType: string; category: string; paymentMethod?: string; confidence: number; notes?: string }[] = data.classified;
-
-      // Merge parsed rows with classification
-      const classMap = new Map(classified.map(c => [c.refNo, c]));
-
-      const source = sources[0];
-      const sourceBankId = source?.bankId;
-      const txs: Transaction[] = deduped.map((row, idx) => {
-        const cls = classMap.get(row.refNo);
-        const inferredPayment = (cls?.paymentMethod ?? "").toLowerCase();
-        const validCards = banks.find(b => b.id === sourceBankId)?.cards || [];
-        
-        let aiCardId: string | undefined = source?.cardId;
-        if (source?.statementType === "bank_account" && inferredPayment) {
-          // Attempt to find a non-CC card matching "upi" or "debit"
-          const match = validCards.find(c => c.type !== "credit" && (c.type === inferredPayment.split(" ")[0] || c.nickname.toLowerCase().includes(inferredPayment)));
-          if (match) aiCardId = match.id;
-        }
-
-        if (source?.statementType === "bank_account" && !inferredPayment) {
-          aiCardId = undefined;
-        }
-
-        const isDebit = row.withdrawal != null;
-        const amt = isDebit ? -(row.withdrawal ?? 0) : (row.deposit ?? 0);
-        const amountAbs = Math.abs(amt);
-        const narration = row.narration ?? "";
-        const narrationLower = narration.toLowerCase();
-        const hasUpiSignal =
-          inferredPayment.includes("upi") ||
-          /\bupi\b/.test(narrationLower) ||
-          /@[a-z]/.test(narrationLower);
-        const lowSignalCategory = !cls?.category || cls.category === "Other";
-        const shouldForceTransport =
-          transportMetaSelected &&
-          isDebit &&
-          amountAbs >= 150 &&
-          amountAbs <= 250 &&
-          hasUpiSignal &&
-          isNarrationUnclearForPurpose(narration) &&
-          lowSignalCategory;
-
-        const finalCategory = shouldForceTransport
-          ? "Transport"
-          : (cls?.category as Category ?? "Other");
-        const finalType = shouldForceTransport
-          ? "spend"
-          : (cls?.transactionType ?? (isDebit ? "spend" : "income"));
-        const finalPaymentMethod = source?.statementType === "credit_card"
-          ? "Credit Card"
-          : shouldForceTransport
-            ? "UPI"
-            : (cls?.paymentMethod ?? "Other");
-        const finalConfidence = shouldForceTransport
-          ? Math.max(cls?.confidence ?? 0, 0.8)
-          : cls?.confidence;
-
-        return {
-          id: `${row.refNo || idx}-${Date.now()}`,
-          refNo: row.refNo,
-          date: row.date,
-          narration: row.narration,
-          amount: amt,
-          category: finalCategory as Category,
-          paymentMethod: finalPaymentMethod as PaymentMethod,
-          transactionType: finalType as Transaction["transactionType"],
-          confidence: finalConfidence,
-          annotated: (finalConfidence ?? 0) >= 0.75,
-          splitStatus: "none",
-          bankId: sourceBankId,
-          cardId: source?.statementType === "bank_account" ? aiCardId : source?.cardId,
-          statementType: source?.statementType,
-          linkedBillId: source?.statementType === "credit_card" ? (selectedCcBillId || undefined) : undefined,
-          closingBalance: row.closingBalance,
-        };
-      });
-
+      const classified: ClassifiedRow[] = data.classified;
+      const txs = mapClassifiedToTransactions(deduped, classified);
       setTransactions(txs);
       setStep(4);
     } catch (e) {
@@ -1639,10 +1832,26 @@ export default function ImportPage() {
               selectedMetaIds={selectedMetaIds}
               onToggleMeta={toggleMeta}
               onConfirm={handleValidated}
+              onOpenPromptMode={() => setPromptDialogOpen(true)}
             />
           )}
-          {step === 3 && <Step3Classify progress={classifyProgress} total={classifyTotal} current={classifyLabel} />}
+          {step === 3 && (
+            <Step3Classify
+              progress={classifyProgress}
+              total={classifyTotal}
+              current={classifyLabel}
+              onOpenPromptMode={() => setPromptDialogOpen(true)}
+            />
+          )}
           {step === 4 && <Step4Review bills={bills} banks={banks} transactions={transactions} onUpdate={updateTx} onBillCreated={handleBillCreated} onNext={handleConfirm} />}
+
+          <PromptModeDialog
+            open={promptDialogOpen}
+            onOpenChange={setPromptDialogOpen}
+            promptText={fullPromptText}
+            rawRowsCount={currentDedupedRows.length}
+            onApplyClassification={handleApplyPromptClassification}
+          />
 
           <Dialog open={snapshotDialogOpen} onOpenChange={setSnapshotDialogOpen}>
             <DialogContent className="sm:max-w-[520px]">
