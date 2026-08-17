@@ -2,7 +2,10 @@ import Groq from "groq-sdk";
 import type { HdfcRawRow } from "./parsers/hdfc-text";
 import type { TransactionType, Category } from "./types";
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+  maxRetries: 3,
+});
 
 export interface ClassifiedRow {
   refNo: string;
@@ -43,8 +46,11 @@ Extract the payment method from the narration if possible (e.g. "UPI-...", "POS.
 Return a JSON array only. No markdown, no explanation. Each element:
 { "refNo": string, "transactionType": string, "category": string, "paymentMethod": "UPI" | "Debit" | "Credit Card" | "Net Banking" | "Other", "confidence": number (0-1), "notes": string (brief reason if confidence < 0.8) }`;
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function classifyTransactions(rows: HdfcRawRow[], metaHints: string[] = []): Promise<ClassifiedRow[]> {
-  const BATCH_SIZE = 12;
+  // Batch size 25 yields ~2.7k total tokens per batch, amortizing prompt overhead and fitting comfortably within rate limits
+  const BATCH_SIZE = Math.max(1, parseInt(process.env.GROQ_BATCH_SIZE || "25", 10));
   const results: ClassifiedRow[] = [];
 
   const metaSection = metaHints.length
@@ -62,24 +68,54 @@ export async function classifyTransactions(rows: HdfcRawRow[], metaHints: string
       direction: r.withdrawal != null ? "debit" : "credit",
     }));
 
-    const completion = await groq.chat.completions.create({
-      model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: JSON.stringify(payload) },
-      ],
-      temperature: 0.1,
-      max_tokens: 4096,
-    });
+    // Inter-batch pacing to avoid bursting the TPM bucket on large statements
+    if (i > 0) {
+      await delay(500);
+    }
 
-    const raw = completion.choices[0]?.message?.content ?? "[]";
-    try {
-      // Strip any markdown code fences if the model wrapped them
-      const jsonStr = raw.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
-      const parsed: ClassifiedRow[] = JSON.parse(jsonStr);
-      results.push(...parsed);
-    } catch {
-      // If JSON parse fails, push unknown classification for each row in batch
+    let batchSuccess = false;
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const completion = await groq.chat.completions.create({
+          model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: JSON.stringify(payload) },
+          ],
+          temperature: 0.1,
+          max_tokens: 4096,
+        });
+
+        const raw = completion.choices[0]?.message?.content ?? "[]";
+        // Strip markdown code fences if model wrapped them
+        const jsonStr = raw.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+        const parsed: ClassifiedRow[] = JSON.parse(jsonStr);
+
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          results.push(...parsed);
+          batchSuccess = true;
+          break;
+        } else {
+          throw new Error("Empty or invalid classification array returned");
+        }
+      } catch (err: unknown) {
+        const isRateLimit =
+          err instanceof Error && (err.message.includes("429") || err.message.toLowerCase().includes("rate limit"));
+
+        if (attempt < maxAttempts) {
+          const waitMs = isRateLimit ? 3000 * attempt : 1500 * attempt;
+          console.warn(`[classify] Batch ${Math.floor(i / BATCH_SIZE) + 1} attempt ${attempt} failed (${err instanceof Error ? err.message : "error"}). Retrying in ${waitMs}ms...`);
+          await delay(waitMs);
+        } else {
+          console.error(`[classify] Batch ${Math.floor(i / BATCH_SIZE) + 1} permanently failed after ${maxAttempts} attempts:`, err);
+        }
+      }
+    }
+
+    if (!batchSuccess) {
+      // If all retries failed, push fallback unclassified entries for this batch
       batch.forEach((r) =>
         results.push({
           refNo: r.refNo,
@@ -95,3 +131,4 @@ export async function classifyTransactions(rows: HdfcRawRow[], metaHints: string
 
   return results;
 }
+
