@@ -8,22 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 
-function parseTxnDate(s: string) {
-  if (!s) return 0;
-  const slash = s.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);
-  if (slash) {
-    const [, d, m, yRaw] = slash;
-    const y = yRaw.length === 2 ? 2000 + parseInt(yRaw, 10) : parseInt(yRaw, 10);
-    return new Date(y, parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
-  }
-  const dash = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dash) {
-    const [, d, m, y] = dash;
-    return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
-  }
-  const isoTime = new Date(s).getTime();
-  return Number.isNaN(isoTime) ? 0 : isoTime;
-}
+import { parseTxnDate } from "@/lib/date";
 
 function formatINR(amount: number) {
   return new Intl.NumberFormat("en-IN", {

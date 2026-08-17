@@ -15,13 +15,7 @@ function formatINR(amount: number) {
   }).format(Math.abs(amount));
 }
 
-function parseDate(raw: string) {
-  const sep = raw.includes("/") ? "/" : "-";
-  const [d, m, y] = raw.split(sep);
-  if (!d || !m || !y) return 0;
-  const year = y.length === 2 ? 2000 + parseInt(y, 10) : parseInt(y, 10);
-  return new Date(year, parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
-}
+import { parseTxnDate } from "@/lib/date";
 
 export default function ExcludedTransactionsPage() {
   const [rows, setRows] = useState<Transaction[]>([]);
@@ -43,7 +37,7 @@ export default function ExcludedTransactionsPage() {
         const q = search.toLowerCase();
         return tx.narration.toLowerCase().includes(q) || tx.refNo.toLowerCase().includes(q);
       })
-      .sort((a, b) => parseDate(b.date) - parseDate(a.date));
+      .sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date));
   }, [rows, search]);
 
   const totalExcluded = excludedRows.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);

@@ -24,6 +24,7 @@ import {
   parseClassifiedJson,
   type ClassifiedRow,
 } from "@/lib/classification-prompt";
+import { parseTxnDate, compareTxnDateDesc } from "@/lib/date";
 import Link from "next/link";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -33,14 +34,7 @@ function formatINR(n: number) {
 }
 
 function parseStatementDate(s: string) {
-  if (!s) return 0;
-  const slash = s.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);
-  if (slash) {
-    const [, d, m, yRaw] = slash;
-    const year = yRaw.length === 2 ? 2000 + parseInt(yRaw, 10) : parseInt(yRaw, 10);
-    return new Date(year, parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
-  }
-  return 0;
+  return parseTxnDate(s);
 }
 
 function isNarrationUnclearForPurpose(narration: string) {
@@ -1760,9 +1754,11 @@ export default function ImportPage() {
 
   if (!loaded) return null;
 
-  const splitTracked = ledgerTransactions
-    .filter((tx) => tx.splitStatus && tx.splitStatus !== "none")
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+  const splitTracked = useMemo(() => {
+    return ledgerTransactions
+      .filter((tx) => tx.splitStatus && tx.splitStatus !== "none")
+      .sort((a, b) => compareTxnDateDesc(a.date, b.date));
+  }, [ledgerTransactions]);
   const splitTrackerTotal = splitTracked.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
   const splitTrackerPending = splitTracked
     .filter((tx) => tx.splitStatus === "to_split" || tx.splitStatus === "splitwise_logged")

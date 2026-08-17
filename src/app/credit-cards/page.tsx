@@ -17,13 +17,7 @@ function formatINR(amount: number) {
   }).format(Math.abs(amount));
 }
 
-function parseDate(raw: string) {
-  const sep = raw.includes("/") ? "/" : "-";
-  const [d, m, y] = raw.split(sep);
-  if (!d || !m || !y) return 0;
-  const year = y.length === 2 ? 2000 + parseInt(y, 10) : parseInt(y, 10);
-  return new Date(year, parseInt(m, 10) - 1, parseInt(d, 10)).getTime();
-}
+import { parseTxnDate } from "@/lib/date";
 
 export default function CreditCardsPage() {
   const { banks, loaded } = useAccounts();
@@ -46,7 +40,7 @@ export default function CreditCardsPage() {
   const ccAllRows = useMemo(() => {
     return allTransactions
       .filter((tx) => tx.statementType === "credit_card" && tx.transactionType !== "excluded")
-      .sort((a, b) => parseDate(b.date) - parseDate(a.date));
+      .sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date));
   }, [allTransactions]);
 
   const unlinkedCcRows = useMemo(() => {
@@ -160,7 +154,7 @@ export default function CreditCardsPage() {
               {bills.map((bill) => {
                 const cycleRows = [...(bill.transactions || [])]
                   .filter((tx) => tx.statementType === "credit_card" && tx.transactionType !== "excluded")
-                  .sort((a, b) => parseDate(a.date) - parseDate(b.date));
+                  .sort((a, b) => parseTxnDate(a.date) - parseTxnDate(b.date));
                 const cycleNetSpend = cycleRows.reduce((sum, tx) => sum - tx.amount, 0);
 
                 return (
