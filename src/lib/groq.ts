@@ -63,7 +63,7 @@ export async function classifyTransactions(rows: HdfcRawRow[], metaHints: string
     }));
 
     const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify(payload) },
