@@ -1752,31 +1752,59 @@ export default function ImportPage() {
     return rawRows.filter((row) => row.date === snapshotLastDate && row.closingBalance != null);
   }, [rawRows, snapshotLastDate]);
 
-  if (!loaded) return null;
-
   const splitTracked = useMemo(() => {
     return ledgerTransactions
       .filter((tx) => tx.splitStatus && tx.splitStatus !== "none")
       .sort((a, b) => compareTxnDateDesc(a.date, b.date));
   }, [ledgerTransactions]);
-  const splitTrackerTotal = splitTracked.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
-  const splitTrackerPending = splitTracked
-    .filter((tx) => tx.splitStatus === "to_split" || tx.splitStatus === "splitwise_logged")
-    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
 
-  const splitFilteredTracked = splitStatusFilter === "all"
-    ? splitTracked
-    : splitTracked.filter((tx) => tx.splitStatus === splitStatusFilter);
+  const splitTrackerTotal = useMemo(
+    () => splitTracked.reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
+    [splitTracked]
+  );
 
-  const splitStatusCounts = splitTracked.reduce((acc, tx) => {
-    const status = tx.splitStatus || "none";
-    acc[status] = (acc[status] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  const splitTrackerPending = useMemo(
+    () =>
+      splitTracked
+        .filter((tx) => tx.splitStatus === "to_split" || tx.splitStatus === "splitwise_logged")
+        .reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
+    [splitTracked]
+  );
 
-  const snapshotBankName = sources[0]?.bankId
-    ? banks.find((bank) => bank.id === sources[0]?.bankId)?.name
-    : undefined;
+  const splitFilteredTracked = useMemo(() => {
+    return splitStatusFilter === "all"
+      ? splitTracked
+      : splitTracked.filter((tx) => tx.splitStatus === splitStatusFilter);
+  }, [splitTracked, splitStatusFilter]);
+
+  const splitStatusCounts = useMemo(() => {
+    return splitTracked.reduce((acc, tx) => {
+      const status = tx.splitStatus || "none";
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [splitTracked]);
+
+  const snapshotBankName = useMemo(() => {
+    return sources[0]?.bankId
+      ? banks.find((bank) => bank.id === sources[0]?.bankId)?.name
+      : undefined;
+  }, [sources, banks]);
+
+  if (!loaded) {
+    return (
+      <div className="p-8 space-y-4 max-w-[1300px]">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-1">Transaction Workspace</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-8">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <span>Loading workspace and accounts…</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 space-y-6 max-w-[1300px]">
