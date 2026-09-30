@@ -6,6 +6,8 @@ import type { HdfcRawRow, HdfcStatementMeta } from "@/lib/parsers/hdfc-text";
 import { parseIciciStatement } from "@/lib/parsers/icici-parser";
 import type { Transaction as IciciTransaction } from "@/lib/parsers/icici-parser";
 import { parseHdfcSwiggyCreditCardPdf } from "@/lib/parsers/icici-cc-pdf";
+import { parseAxisCreditCardPdf } from "@/lib/parsers/axis-cc-pdf";
+import type { AxisCcPdfTransaction } from "@/lib/parsers/axis-cc-pdf";
 import { getParserCatalogItem, type ParserId } from "@/lib/parsers/catalog";
 
 export interface ParsedStatementPayload {
@@ -154,6 +156,49 @@ async function executeHdfcSwiggyCcPdfParser(buffer: Uint8Array, password?: strin
   };
 }
 
+async function executeAxisCcPdfParser(buffer: Uint8Array, password?: string): Promise<ExecuteParserResult> {
+  const result = await parseAxisCreditCardPdf(buffer, password);
+  if (!result.success) {
+    return {
+      success: false,
+      error: result.error,
+      passwordRequired: result.passwordRequired,
+    };
+  }
+
+  const txs: AxisCcPdfTransaction[] = result.transactions;
+  const rows: HdfcRawRow[] = txs.map((tx) => ({
+    refNo: tx.refNo,
+    date: tx.date,
+    narration: tx.merchantCategory ? `${tx.narration} [${tx.merchantCategory}]` : tx.narration,
+    valueDate: tx.date,
+    withdrawal: tx.type === "WITHDRAWAL" ? tx.amount : null,
+    deposit: tx.type === "DEPOSIT" ? tx.amount : null,
+    closingBalance: 0,
+  }));
+
+  const drRows = rows.filter((row) => row.withdrawal != null);
+  const crRows = rows.filter((row) => row.deposit != null);
+
+  const meta: HdfcStatementMeta = {
+    accountNo: result.cardNo || "Axis CC",
+    customerName: "Axis Bank Credit Card",
+    startDate: result.startDate || rows[0]?.date || "",
+    endDate: result.endDate || rows[rows.length - 1]?.date || "",
+    openingBalance: 0,
+    closingBalance: 0,
+    drCount: drRows.length,
+    crCount: crRows.length,
+    totalDebits: drRows.reduce((sum, row) => sum + (row.withdrawal || 0), 0),
+    totalCredits: crRows.reduce((sum, row) => sum + (row.deposit || 0), 0),
+  };
+
+  return {
+    success: true,
+    payload: { meta, rows },
+  };
+}
+
 export async function executeParserById(
   parserId: ParserId,
   buffer: Uint8Array,
@@ -165,6 +210,7 @@ export async function executeParserById(
   if (parserId === "hdfc_text") return executeHdfcTextParser(buffer);
   if (parserId === "icici_xls") return executeIciciXlsParser(buffer, password);
   if (parserId === "hdfc_swiggy_cc_pdf") return executeHdfcSwiggyCcPdfParser(buffer, password);
+  if (parserId === "axis_cc_pdf") return executeAxisCcPdfParser(buffer, password);
 
   return { success: false, error: "Parser not implemented" };
 }

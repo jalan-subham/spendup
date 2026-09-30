@@ -1,4 +1,4 @@
-export type ParserId = "hdfc_text" | "icici_xls" | "hdfc_swiggy_cc_pdf";
+export type ParserId = "hdfc_text" | "icici_xls" | "hdfc_swiggy_cc_pdf" | "axis_cc_pdf";
 
 export interface ParserCatalogItem {
   id: ParserId;
@@ -7,7 +7,7 @@ export interface ParserCatalogItem {
   supportedExtensions: string[];
   supportedMimeTypes: string[];
   acceptsPassword: boolean;
-  bankKeyword: "hdfc" | "icici";
+  bankKeyword: "hdfc" | "icici" | "axis";
   statementType: "bank_account" | "credit_card";
 }
 
@@ -43,6 +43,16 @@ export const PARSER_CATALOG: ParserCatalogItem[] = [
     supportedMimeTypes: ["application/pdf"],
     acceptsPassword: true,
     bankKeyword: "hdfc",
+    statementType: "credit_card",
+  },
+  {
+    id: "axis_cc_pdf",
+    label: "Axis Bank CC PDF Parser",
+    description: "Parses Axis Bank credit card PDF statements (Flipkart Axis, MY Zone, etc.). Supports password-protected PDFs — password is typically first 4 letters of your name (caps) + DDMM of birth date.",
+    supportedExtensions: [".pdf"],
+    supportedMimeTypes: ["application/pdf"],
+    acceptsPassword: true,
+    bankKeyword: "axis",
     statementType: "credit_card",
   },
 ];
