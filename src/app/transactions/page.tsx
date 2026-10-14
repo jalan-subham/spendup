@@ -17,14 +17,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   FileUp, CheckCircle2, Loader2, AlertTriangle, ArrowUpRight, ArrowDownRight,
   Scissors, Building2, ChevronRight, Search, RefreshCw,
-  Info, AlertCircle, Lock, CreditCard, Landmark, Copy, Check, Sparkles
+  Info, AlertCircle, Lock, CreditCard, Landmark, Copy, Check, Sparkles,
+  ArrowUpDown, ArrowUp, ArrowDown
 } from "lucide-react";
 import {
   buildFullClassificationPrompt,
   parseClassifiedJson,
   type ClassifiedRow,
 } from "@/lib/classification-prompt";
-import { parseTxnDate, compareTxnDateDesc } from "@/lib/date";
+import { parseTxnDate, compareTxnDateDesc, compareTxnDateAsc } from "@/lib/date";
 import Link from "next/link";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -1334,6 +1335,10 @@ export default function ImportPage() {
   const [splitCommentDrafts, setSplitCommentDrafts] = useState<Record<string, string>>({});
   const [splitCommentSavingId, setSplitCommentSavingId] = useState<string>("");
   const [splitStatusFilter, setSplitStatusFilter] = useState<"all" | NonNullable<Transaction["splitStatus"]>>("all");
+  const [splitSearch, setSplitSearch] = useState("");
+  const [splitCategoryFilter, setSplitCategoryFilter] = useState<string>("all");
+  const [splitSortColumn, setSplitSortColumn] = useState<"date" | "amount" | "status">("date");
+  const [splitSortDir, setSplitSortDir] = useState<"asc" | "desc">("desc");
   const [manualBusy, setManualBusy] = useState(false);
   const [manualMessage, setManualMessage] = useState("");
   const [manualTx, setManualTx] = useState({
@@ -1772,10 +1777,42 @@ export default function ImportPage() {
   );
 
   const splitFilteredTracked = useMemo(() => {
-    return splitStatusFilter === "all"
+    let result = splitStatusFilter === "all"
       ? splitTracked
       : splitTracked.filter((tx) => tx.splitStatus === splitStatusFilter);
-  }, [splitTracked, splitStatusFilter]);
+
+    // Text search filter
+    if (splitSearch.trim()) {
+      const q = splitSearch.toLowerCase();
+      result = result.filter(
+        (tx) =>
+          tx.narration.toLowerCase().includes(q) ||
+          (tx.comment ?? "").toLowerCase().includes(q) ||
+          (tx.category ?? "").toLowerCase().includes(q)
+      );
+    }
+
+    // Category filter
+    if (splitCategoryFilter !== "all") {
+      result = result.filter((tx) => (tx.category ?? "Other") === splitCategoryFilter);
+    }
+
+    // Sorting
+    const SPLIT_STATUS_ORDER: Record<string, number> = { to_split: 0, splitwise_logged: 1, settled: 2, none: 3 };
+    result = [...result].sort((a, b) => {
+      let cmp = 0;
+      if (splitSortColumn === "date") {
+        cmp = parseTxnDate(a.date) - parseTxnDate(b.date);
+      } else if (splitSortColumn === "amount") {
+        cmp = Math.abs(a.amount) - Math.abs(b.amount);
+      } else if (splitSortColumn === "status") {
+        cmp = (SPLIT_STATUS_ORDER[a.splitStatus || "none"] ?? 3) - (SPLIT_STATUS_ORDER[b.splitStatus || "none"] ?? 3);
+      }
+      return splitSortDir === "asc" ? cmp : -cmp;
+    });
+
+    return result;
+  }, [splitTracked, splitStatusFilter, splitSearch, splitCategoryFilter, splitSortColumn, splitSortDir]);
 
   const splitStatusCounts = useMemo(() => {
     return splitTracked.reduce((acc, tx) => {
@@ -1784,6 +1821,22 @@ export default function ImportPage() {
       return acc;
     }, {} as Record<string, number>);
   }, [splitTracked]);
+
+  const splitCategoriesAvailable = useMemo(() => {
+    const cats = new Set(splitTracked.map((tx) => tx.category ?? "Other"));
+    return Array.from(cats).sort();
+  }, [splitTracked]);
+
+  const toggleSplitSort = useCallback((col: "date" | "amount" | "status") => {
+    setSplitSortColumn((prev) => {
+      if (prev === col) {
+        setSplitSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSplitSortDir(col === "amount" ? "desc" : col === "date" ? "desc" : "asc");
+      }
+      return col;
+    });
+  }, []);
 
   const snapshotBankName = useMemo(() => {
     return sources[0]?.bankId
@@ -1996,27 +2049,67 @@ export default function ImportPage() {
               {trackerError && <p className="text-xs text-destructive">{trackerError}</p>}
 
               {!trackerLoading && splitTracked.length > 0 && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-[11px] text-muted-foreground mr-1">Filter:</p>
-                  <Button
-                    size="sm"
-                    variant={splitStatusFilter === "all" ? "default" : "outline"}
-                    className="h-7 text-[10px] px-3"
-                    onClick={() => setSplitStatusFilter("all")}
-                  >
-                    All ({splitTracked.length})
-                  </Button>
-                  {(["to_split", "splitwise_logged", "settled"] as const).map((status) => (
+                <div className="space-y-3">
+                  {/* Status filter pills */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[11px] text-muted-foreground mr-1">Status:</p>
                     <Button
-                      key={status}
                       size="sm"
-                      variant={splitStatusFilter === status ? "default" : "outline"}
+                      variant={splitStatusFilter === "all" ? "default" : "outline"}
                       className="h-7 text-[10px] px-3"
-                      onClick={() => setSplitStatusFilter(status)}
+                      onClick={() => setSplitStatusFilter("all")}
                     >
-                      {SPLIT_STATUS_LABELS[status]} ({splitStatusCounts[status] || 0})
+                      All ({splitTracked.length})
                     </Button>
-                  ))}
+                    {(["to_split", "splitwise_logged", "settled"] as const).map((status) => (
+                      <Button
+                        key={status}
+                        size="sm"
+                        variant={splitStatusFilter === status ? "default" : "outline"}
+                        className="h-7 text-[10px] px-3"
+                        onClick={() => setSplitStatusFilter(status)}
+                      >
+                        {SPLIT_STATUS_LABELS[status]} ({splitStatusCounts[status] || 0})
+                      </Button>
+                    ))}
+                  </div>
+
+                  {/* Search + category filter row */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        value={splitSearch}
+                        onChange={(e) => setSplitSearch(e.target.value)}
+                        placeholder="Search narration, comment, category…"
+                        className="h-8 pl-8 w-64 text-xs"
+                      />
+                    </div>
+                    <Select value={splitCategoryFilter} onValueChange={(v) => v && setSplitCategoryFilter(v)}>
+                      <SelectTrigger className="h-8 w-40 text-xs">
+                        <SelectValue placeholder="Category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All categories</SelectItem>
+                        {splitCategoriesAvailable.map((cat) => (
+                          <SelectItem key={cat} value={cat} className="text-xs">{cat}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {(splitSearch || splitCategoryFilter !== "all") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-[10px] px-2 text-muted-foreground hover:text-foreground"
+                        onClick={() => { setSplitSearch(""); setSplitCategoryFilter("all"); }}
+                      >
+                        Clear filters
+                      </Button>
+                    )}
+                    <span className="ml-auto text-[10px] text-muted-foreground">
+                      {splitFilteredTracked.length} of {splitTracked.length} shown
+                    </span>
+                  </div>
                 </div>
               )}
 
@@ -2030,11 +2123,47 @@ export default function ImportPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="text-xs">Date</TableHead>
+                      <TableHead className="text-xs">
+                        <button
+                          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                          onClick={() => toggleSplitSort("date")}
+                        >
+                          Date
+                          {splitSortColumn === "date" ? (
+                            splitSortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                          ) : (
+                            <ArrowUpDown className="h-3 w-3 opacity-40" />
+                          )}
+                        </button>
+                      </TableHead>
                       <TableHead className="text-xs">Narration</TableHead>
                       <TableHead className="text-xs">Comment</TableHead>
-                      <TableHead className="text-xs text-right">Amount</TableHead>
-                      <TableHead className="text-xs">Status</TableHead>
+                      <TableHead className="text-xs text-right">
+                        <button
+                          className="inline-flex items-center gap-1 hover:text-foreground transition-colors ml-auto"
+                          onClick={() => toggleSplitSort("amount")}
+                        >
+                          Amount
+                          {splitSortColumn === "amount" ? (
+                            splitSortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                          ) : (
+                            <ArrowUpDown className="h-3 w-3 opacity-40" />
+                          )}
+                        </button>
+                      </TableHead>
+                      <TableHead className="text-xs">
+                        <button
+                          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                          onClick={() => toggleSplitSort("status")}
+                        >
+                          Status
+                          {splitSortColumn === "status" ? (
+                            splitSortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                          ) : (
+                            <ArrowUpDown className="h-3 w-3 opacity-40" />
+                          )}
+                        </button>
+                      </TableHead>
                       <TableHead className="text-xs">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
