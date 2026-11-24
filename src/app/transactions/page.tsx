@@ -69,19 +69,38 @@ const STEPS = [
 
 function StepBar({ current }: { current: number }) {
   return (
-    <div className="flex items-center gap-0">
-      {STEPS.map((s, i) => (
-        <div key={s.n} className="flex items-center">
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-            s.n === current ? "bg-primary text-primary-foreground" :
-            s.n < current ? "text-primary" : "text-muted-foreground"
-          }`}>
-            {s.n < current ? <CheckCircle2 className="h-3.5 w-3.5" /> : <span className="h-4 w-4 flex items-center justify-center rounded-full border border-current text-[10px]">{s.n}</span>}
-            {s.label}
+    <div className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-[4px] border border-border bg-secondary sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+      {STEPS.map((s) => {
+        const active = s.n === current;
+        const done = s.n < current;
+        return (
+          <div
+            key={s.n}
+            className={`flex items-center gap-2.5 px-4 py-2.5 text-xs font-medium transition-colors duration-120 ${
+              active
+                ? "bg-accent text-accent-foreground font-semibold"
+                : done
+                ? "bg-background text-success"
+                : "text-muted-foreground"
+            }`}
+          >
+            {done ? (
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+            ) : (
+              <span
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] border font-mono text-[10px] ${
+                  active
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-current"
+                }`}
+              >
+                {s.n}
+              </span>
+            )}
+            <span>{s.label}</span>
           </div>
-          {i < STEPS.length - 1 && <ChevronRight className="h-4 w-4 text-muted-foreground/40 mx-1" />}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -277,21 +296,21 @@ function Step1Upload({
     <div className="grid gap-5 lg:grid-cols-5">
       {/* Source selection */}
       <Card className="lg:col-span-2">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold">1 · Import Type & Source</CardTitle>
-          <CardDescription className="text-xs space-y-1">
-            <p>Start by selecting what you are uploading, then map it correctly.</p>
-            <p className="text-[10px] text-muted-foreground/90 bg-muted/50 p-1.5 rounded border border-border/50">
-              <strong>Rule:</strong> One billing cycle maps to one CC statement import.
+        <CardHeader className="border-b border-border pb-3">
+          <CardTitle className="text-sm font-semibold">Import Type &amp; Source</CardTitle>
+          <CardDescription className="space-y-1.5 text-xs">
+            <p>Select statement type and target bank/card before uploading.</p>
+            <p className="rounded-[2px] border border-border bg-secondary px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              <strong className="text-foreground">Rule:</strong> One billing cycle maps to one CC statement import.
             </p>
           </CardDescription>
         </CardHeader>
         <CardContent>
           {banks.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-6 text-center text-muted-foreground">
-              <Building2 className="h-6 w-6 opacity-30" />
+              <Building2 className="h-6 w-6 opacity-40" />
               <p className="text-xs">No banks configured.</p>
-              <Link href="/settings" className="inline-flex items-center rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors">Go to Settings →</Link>
+              <Link href="/settings" className="inline-flex items-center rounded-[2px] border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-secondary transition-colors">Go to Settings →</Link>
             </div>
           ) : (
             <div className="space-y-4">
@@ -299,7 +318,7 @@ function Step1Upload({
                 <Button
                   type="button"
                   variant={uploadKind === "cc" ? "default" : "outline"}
-                  className="h-10 text-xs gap-1.5"
+                  className="h-9 text-xs gap-1.5"
                   onClick={() => {
                     setUploadKind("cc");
                     setNonCcBankId("");
@@ -311,7 +330,7 @@ function Step1Upload({
                 <Button
                   type="button"
                   variant={uploadKind === "non_cc" ? "default" : "outline"}
-                  className="h-10 text-xs gap-1.5"
+                  className="h-9 text-xs gap-1.5"
                   onClick={() => {
                     setUploadKind("non_cc");
                     setCcBankId("");
@@ -319,16 +338,16 @@ function Step1Upload({
                   }}
                 >
                   <Landmark className="h-3.5 w-3.5" />
-                  Non-CC Bank Statement
+                  Bank Statement
                 </Button>
               </div>
 
               {uploadKind === "cc" && (
-                <div className="space-y-3 rounded-lg border bg-gradient-to-b from-background to-muted/20 p-3">
-                  <p className="text-[11px] font-semibold text-foreground">CC Flow</p>
-                  <p className="text-[10px] text-muted-foreground -mt-2">Select bank, credit card, then billing cycle.</p>
+                <div className="space-y-3 rounded-[2px] border border-border bg-secondary p-3.5">
+                  <p className="text-xs font-semibold text-foreground">Credit Card Flow</p>
+                  <p className="text-[11px] text-muted-foreground -mt-2">Select bank, credit card, then billing cycle.</p>
                   <Select value={ccBankId} onValueChange={(value) => { setCcBankId(value ?? ""); setCcCardId(""); setSelectedCcBillId(""); }}>
-                    <SelectTrigger className="h-8 text-xs">
+                    <SelectTrigger className="h-8 w-full text-xs">
                       <SelectValue placeholder="Select bank">
                         {selectedCcBank?.name}
                       </SelectValue>
@@ -341,7 +360,7 @@ function Step1Upload({
                   </Select>
 
                   <Select value={ccCardId} onValueChange={(value) => { setCcCardId(value ?? ""); setSelectedCcBillId(""); }}>
-                    <SelectTrigger className="h-8 text-xs" disabled={!ccBankId}>
+                    <SelectTrigger className="h-8 w-full text-xs" disabled={!ccBankId}>
                       <SelectValue placeholder="Select credit card">
                         {ccCards.find((card) => card.id === ccCardId)?.nickname}
                       </SelectValue>
@@ -356,7 +375,7 @@ function Step1Upload({
                   </Select>
 
                   <Select value={selectedCcBillId} onValueChange={(value) => setSelectedCcBillId(value ?? "")}>
-                    <SelectTrigger className="h-8 text-xs" disabled={!ccCardId}>
+                    <SelectTrigger className="h-8 w-full text-xs" disabled={!ccCardId}>
                       <SelectValue placeholder="Link billing cycle">
                         {billsForCard.find((bill) => bill.id === selectedCcBillId)?.cycleName}
                       </SelectValue>
@@ -371,25 +390,25 @@ function Step1Upload({
                   </Select>
 
                   {ccCardId && billsForCard.length === 0 && (
-                    <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    <p className="rounded-[2px] border border-[#e0bf00]/60 bg-[#fffbc2] px-2.5 py-1.5 text-[11px] text-[#614e00] dark:bg-[#2e2600] dark:text-[#faf1a3]">
                       No billing cycle found for this card. Create a cycle in Bills and retry.
                     </p>
                   )}
 
                   {ccCardId && previouslyImportedCycles.length > 0 && (
-                    <p className="text-[10px] text-muted-foreground bg-muted/40 border border-border rounded px-2 py-1">
-                      {previouslyImportedCycles.length} cycle(s) already have imported CC rows. Re-upload is allowed; duplicates are skipped by ref no on save.
+                    <p className="rounded-[2px] border border-border bg-background px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                      {previouslyImportedCycles.length} cycle(s) already have imported CC rows. Duplicates are skipped by ref no on save.
                     </p>
                   )}
                 </div>
               )}
 
               {uploadKind === "non_cc" && (
-                <div className="space-y-3 rounded-lg border bg-gradient-to-b from-background to-muted/20 p-3">
-                  <p className="text-[11px] font-semibold text-foreground">Non-CC Flow</p>
-                  <p className="text-[10px] text-muted-foreground -mt-2">Choose one bank. All debit/UPI sources for it are included.</p>
+                <div className="space-y-3 rounded-[2px] border border-border bg-secondary p-3.5">
+                  <p className="text-xs font-semibold text-foreground">Bank Account Flow</p>
+                  <p className="text-[11px] text-muted-foreground -mt-2">Choose one bank. All debit/UPI sources for it are included.</p>
                   <Select value={nonCcBankId} onValueChange={(value) => setNonCcBankId(value ?? "")}>
-                    <SelectTrigger className="h-8 text-xs">
+                    <SelectTrigger className="h-8 w-full text-xs">
                       <SelectValue placeholder="Select bank">
                         {selectedNonCcBank?.name}
                       </SelectValue>
@@ -402,13 +421,13 @@ function Step1Upload({
                   </Select>
 
                   {nonCcBankId && (
-                    <div className="rounded-lg bg-muted/40 p-2.5 border">
-                      <p className="text-[10px] font-semibold text-muted-foreground mb-1">Included sources</p>
+                    <div className="rounded-[2px] border border-border bg-background p-2.5">
+                      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Included sources</p>
                       {nonCcCards.length === 0 ? (
-                        <p className="text-[10px] text-amber-600">No non-CC sources configured for this bank.</p>
+                        <p className="text-[11px] text-warning">No non-CC sources configured for this bank.</p>
                       ) : (
                         nonCcCards.map((card) => (
-                          <p key={card.id} className="text-[10px] text-muted-foreground leading-5">
+                          <p key={card.id} className="text-[11px] leading-5 text-muted-foreground">
                             {card.nickname} {card.last4 ? `•${card.last4}` : ""}
                           </p>
                         ))
@@ -423,19 +442,19 @@ function Step1Upload({
       </Card>
 
       {/* File upload */}
-      <Card className="lg:col-span-3 border-dashed border-2 hover:bg-muted/20 transition-colors"
+      <Card className="lg:col-span-3 transition-colors hover:border-input"
         onClick={() => !requiresPassword && canSelectFile && inputRef.current?.click()}>
-        <CardContent className="p-6 md:p-8">
+        <CardContent className="p-6">
           <div className="grid gap-6 md:grid-cols-[1.1fr_0.9fr] items-start">
             <div className="space-y-4">
               <div className="w-full max-w-sm" onClick={e => e.stopPropagation()}>
-                <p className="text-left text-xs font-semibold text-muted-foreground mb-1">Parser</p>
+                <p className="mb-1.5 text-left text-xs font-semibold text-foreground">Parser</p>
                 <Select
                   value={parserId}
                   onValueChange={(v) => v && setParserId(v as ParserId)}
                   disabled={availableParsers.length === 0}
                 >
-                  <SelectTrigger className="h-9 text-xs bg-background">
+                  <SelectTrigger className="h-9 w-full bg-background text-xs">
                     <SelectValue placeholder={
                       !uploadKind
                         ? "Select upload type first"
@@ -457,39 +476,39 @@ function Step1Upload({
                   </SelectContent>
                 </Select>
                 {activeParser && (
-                  <p className="text-[10px] text-muted-foreground mt-1.5 text-left">
-                    Selected: <span className="font-medium text-foreground">{activeParser.label}</span> · Supports {activeParser.supportedExtensions.join(", ")}
+                  <p className="mt-1.5 text-left font-mono text-[11px] text-muted-foreground">
+                    {activeParser.label} · {activeParser.supportedExtensions.join(", ")}
                   </p>
                 )}
               </div>
 
               {requiresPassword ? (
-                <div className="space-y-4 w-full max-w-sm animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-                  <div className="bg-amber-50 dark:bg-amber-950/40 p-5 rounded-xl border border-amber-200 text-left">
-                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-400 flex items-center gap-2 mb-3">
-                      <Lock className="w-4 h-4" /> Password Required
+                <div className="w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+                  <div className="rounded-[2px] border border-[#e0bf00]/60 bg-[#fffbc2] p-4 text-left text-[#614e00] dark:bg-[#2e2600]/60 dark:text-[#faf1a3]">
+                    <p className="mb-3 flex items-center gap-2 text-xs font-semibold">
+                      <Lock className="h-4 w-4" /> Password Required
                     </p>
-                    <Input type="password" placeholder="e.g. SUBH0710" value={password} onChange={e => setPassword(e.target.value)} className="bg-white dark:bg-black" />
-                    <Button className="w-full mt-4" onClick={() => handleFile(currentFile!, password)}>Unlock & Parse PDF</Button>
-                    <Button variant="ghost" className="w-full mt-1 text-xs" onClick={() => { setRequiresPassword(false); setCurrentFile(null); }}>Cancel</Button>
+                    <Input type="password" placeholder="e.g. SUBH0710" value={password} onChange={e => setPassword(e.target.value)} />
+                    <Button className="mt-3 w-full" onClick={() => handleFile(currentFile!, password)}>Unlock &amp; Parse PDF</Button>
+                    <Button variant="ghost" className="mt-1 w-full text-xs" onClick={() => { setRequiresPassword(false); setCurrentFile(null); }}>Cancel</Button>
                   </div>
-                  {error && <p className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="h-3 w-3" />{error}</p>}
+                  {error && <p className="flex items-center gap-1 text-xs text-destructive"><AlertCircle className="h-3 w-3" />{error}</p>}
                 </div>
               ) : (
-                <div className="rounded-xl border bg-background p-5 text-left">
-                  <p className="text-xs font-semibold text-foreground mb-2">Ready-To-Import Summary</p>
-                  <p className="text-[11px] text-muted-foreground">Flow: <span className="text-foreground font-medium">{uploadKind === "cc" ? "CC Statement" : uploadKind === "non_cc" ? "Non-CC Bank Statement" : "Not selected"}</span></p>
-                  <p className="text-[11px] text-muted-foreground mt-1">Sources: <span className="text-foreground font-medium">{sources.length}</span></p>
+                <div className="rounded-[2px] border border-border bg-secondary p-4 text-left">
+                  <p className="mb-2 text-xs font-semibold text-foreground">Ready-To-Import Summary</p>
+                  <p className="text-[11px] text-muted-foreground">Flow: <span className="font-mono font-medium text-foreground">{uploadKind === "cc" ? "CC Statement" : uploadKind === "non_cc" ? "Non-CC Bank Statement" : "Not selected"}</span></p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">Sources: <span className="font-mono font-medium text-foreground">{sources.length}</span></p>
                   {uploadKind === "cc" && (
-                    <p className="text-[11px] text-muted-foreground mt-1">Billing cycle: <span className="text-foreground font-medium">{selectedCcBillId ? (billsForCard.find((bill) => bill.id === selectedCcBillId)?.cycleName || "Linked") : "Not selected"}</span></p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">Billing cycle: <span className="font-mono font-medium text-foreground">{selectedCcBillId ? (billsForCard.find((bill) => bill.id === selectedCcBillId)?.cycleName || "Linked") : "Not selected"}</span></p>
                   )}
                   {sources.length > 0 && (
-                    <div className="mt-2 pt-2 border-t space-y-1">
+                    <div className="mt-2.5 space-y-1 border-t border-border pt-2">
                       {sources.map((s, i) => {
                         const b = banks.find((bank) => bank.id === s.bankId);
                         const c = b?.cards.find((card) => card.id === s.cardId);
                         return (
-                          <p key={i} className="text-[10px] text-muted-foreground leading-5">
+                          <p key={i} className="font-mono text-[10px] leading-5 text-muted-foreground">
                             {b?.name} · {c?.nickname} ({s.statementType === "bank_account" ? "Bank" : "CC"})
                           </p>
                         );
@@ -500,35 +519,34 @@ function Step1Upload({
               )}
             </div>
 
-            <div className="rounded-2xl border border-dashed bg-muted/20 p-6 md:p-8 text-center flex flex-col items-center justify-center min-h-[300px] cursor-pointer"
+            <div className="flex min-h-[280px] cursor-pointer flex-col items-center justify-center rounded-[2px] border border-dashed border-input bg-secondary/60 p-6 text-center transition-colors hover:border-primary/60 hover:bg-secondary"
               onClick={() => !requiresPassword && canSelectFile && inputRef.current?.click()}>
               <input ref={inputRef} type="file" accept=".txt,.text,.xls,.xlsx,.pdf" className="hidden"
                 onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
               {loading ? (
                 <div className="space-y-3">
-                  <Loader2 className="h-9 w-9 animate-spin mx-auto text-primary" />
-                  <p className="text-sm font-medium">Parsing statement…</p>
+                  <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+                  <p className="text-xs font-medium">Parsing statement…</p>
                 </div>
               ) : (
                 <>
-                  <div className="mx-auto h-12 w-12 rounded-xl bg-primary/8 border border-primary/20 flex items-center justify-center">
-                    <FileUp className="h-5 w-5 text-primary" />
+                  <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-[2px] border border-primary/30 bg-accent">
+                    <FileUp className="h-4 w-4 text-primary" />
                   </div>
                   <div className="mt-3">
-                    <p className="text-base font-semibold">Drop statement file here</p>
-                    <p className="text-xs text-muted-foreground mt-1">Parser and source mapping are now selected on the left.</p>
+                    <p className="text-sm font-semibold">Drop statement file here</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Select flow, source, and parser on the left.</p>
                   </div>
                   <Button size="sm" className="mt-4" onClick={e => {
                     e.stopPropagation();
                     if (inputRef.current) {
-                      // Allow selecting the same file again after a failed attempt.
                       inputRef.current.value = "";
                       inputRef.current.click();
                     }
                   }} disabled={!canSelectFile}>
                     {!uploadKind ? "Select upload type first" : sources.length === 0 ? "Select sources first" : !parserId ? "Select parser first" : uploadKind === "cc" && !selectedCcBillId ? "Select billing cycle" : "Select File"}
                   </Button>
-                  {error && <p className="text-xs text-destructive mt-2 flex items-center gap-1"><AlertCircle className="h-3 w-3" />{error}</p>}
+                  {error && <p className="mt-2 flex items-center gap-1 text-xs text-destructive"><AlertCircle className="h-3 w-3" />{error}</p>}
                 </>
               )}
             </div>

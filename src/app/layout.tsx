@@ -1,24 +1,24 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Figtree, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AppShell } from "@/components/app-shell";
 
-const ibmPlexSans = IBM_Plex_Sans({
+const figtree = Figtree({
   variable: "--font-sans",
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700"],
 });
 
-const ibmPlexMono = IBM_Plex_Mono({
+const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
-  weight: ["400", "500"],
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
   title: "SpendUp",
-  description: "Track your monthly spending with ease and AI-driven insights.",
+  description: "Self-hosted personal finance and credit card reconciliation engine.",
 };
 
 export default function RootLayout({
@@ -29,16 +29,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${ibmPlexSans.variable} ${ibmPlexMono.variable} h-full antialiased`}
+      className={`${figtree.variable} ${jetbrainsMono.variable} h-full antialiased`}
       suppressHydrationWarning
       style={{ colorScheme: "light dark" }}
     >
-      <body className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/20 flex">
+      <body className="min-h-screen bg-background font-sans text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <Sidebar />
-          <div className="flex-1 flex flex-col min-h-screen ml-[220px]">
-            <main className="flex-1 overflow-x-hidden">{children}</main>
-          </div>
+          <AppShell>{children}</AppShell>
         </ThemeProvider>
       </body>
     </html>

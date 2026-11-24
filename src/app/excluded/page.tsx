@@ -2,10 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Transaction } from "@/lib/types";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Search } from "lucide-react";
+import { parseTxnDate } from "@/lib/date";
 
 function formatINR(amount: number) {
   return new Intl.NumberFormat("en-IN", {
@@ -14,8 +22,6 @@ function formatINR(amount: number) {
     maximumFractionDigits: 0,
   }).format(Math.abs(amount));
 }
-
-import { parseTxnDate } from "@/lib/date";
 
 export default function ExcludedTransactionsPage() {
   const [rows, setRows] = useState<Transaction[]>([]);
@@ -35,12 +41,18 @@ export default function ExcludedTransactionsPage() {
       .filter((tx) => {
         if (!search.trim()) return true;
         const q = search.toLowerCase();
-        return tx.narration.toLowerCase().includes(q) || tx.refNo.toLowerCase().includes(q);
+        return (
+          tx.narration.toLowerCase().includes(q) ||
+          tx.refNo.toLowerCase().includes(q)
+        );
       })
       .sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date));
   }, [rows, search]);
 
-  const totalExcluded = excludedRows.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+  const totalExcluded = excludedRows.reduce(
+    (sum, tx) => sum + Math.abs(tx.amount),
+    0
+  );
 
   const restore = async (id: string) => {
     const res = await fetch("/api/transactions", {
@@ -49,62 +61,95 @@ export default function ExcludedTransactionsPage() {
       body: JSON.stringify({ id, transactionType: "spend" }),
     });
     if (!res.ok) return;
-    setRows((prev) => prev.map((tx) => (tx.id === id ? { ...tx, transactionType: "spend" } : tx)));
+    setRows((prev) =>
+      prev.map((tx) => (tx.id === id ? { ...tx, transactionType: "spend" } : tx))
+    );
   };
 
   if (loading) {
-    return <div className="p-8 text-sm text-muted-foreground">Loading excluded transactions...</div>;
+    return (
+      <div className="p-6 text-sm text-muted-foreground lg:p-8">
+        Loading excluded transactions…
+      </div>
+    );
   }
 
   return (
-    <div className="p-8 space-y-6 max-w-[1200px]">
-      <div>
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-1">Cleanup</p>
-        <h1 className="text-2xl font-semibold tracking-tight">Excluded Transactions</h1>
-      </div>
-
-      <Card>
-        <CardHeader className="space-y-3">
-          <CardTitle className="text-sm font-semibold">Excluded Ledger Rows</CardTitle>
-          <div className="flex items-center gap-3">
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search narration or ref no..."
-              className="max-w-sm h-9"
-            />
-            <p className="text-xs text-muted-foreground">
-              {excludedRows.length} rows · Total {formatINR(totalExcluded)}
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-14 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-xs sm:px-6 lg:top-0 lg:px-8">
+        <div className="mx-auto flex max-w-[1260px] flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              Excluded Transactions
+            </h1>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Transactions marked excluded from monthly totals; restore any row
+              to re-include it.
             </p>
           </div>
-        </CardHeader>
-        <CardContent>
+          <span className="font-mono text-xs text-muted-foreground tabular-nums">
+            {excludedRows.length} rows · {formatINR(totalExcluded)}
+          </span>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-[1260px] space-y-4 px-4 py-6 sm:px-6 lg:px-8">
+        <section className="overflow-hidden rounded-[4px] border border-border bg-card">
+          <div className="border-b border-border bg-secondary/50 px-5 py-3">
+            <div className="relative max-w-sm">
+              <Search className="pointer-events-none absolute top-2 left-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search narration or ref no…"
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+          </div>
+
           {excludedRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-10 text-center">No excluded transactions found.</p>
+            <p className="py-12 text-center text-xs text-muted-foreground">
+              No excluded transactions found.
+            </p>
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Date</TableHead>
-                  <TableHead className="text-xs">Narration</TableHead>
-                  <TableHead className="text-xs">Ref</TableHead>
-                  <TableHead className="text-xs">Source</TableHead>
-                  <TableHead className="text-xs text-right">Amount</TableHead>
-                  <TableHead className="text-xs text-center">Action</TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="pl-5">Date</TableHead>
+                  <TableHead>Narration</TableHead>
+                  <TableHead>Ref No</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="pr-5 text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {excludedRows.map((tx) => (
                   <TableRow key={tx.id}>
-                    <TableCell className="text-xs font-mono text-muted-foreground">{tx.date}</TableCell>
-                    <TableCell className="text-xs font-medium max-w-[320px] truncate">{tx.narration}</TableCell>
-                    <TableCell className="text-[10px] text-muted-foreground font-mono">{tx.refNo}</TableCell>
-                    <TableCell className="text-[10px] text-muted-foreground">
-                      {tx.statementType === "credit_card" ? "CC" : "Bank"}
+                    <TableCell className="pl-5 font-mono text-xs text-muted-foreground">
+                      {tx.date}
                     </TableCell>
-                    <TableCell className="text-xs text-right font-medium">{tx.amount < 0 ? "−" : "+"}{formatINR(tx.amount)}</TableCell>
-                    <TableCell className="text-center">
-                      <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => restore(tx.id)}>
+                    <TableCell className="max-w-[320px] truncate text-xs font-medium">
+                      {tx.narration}
+                    </TableCell>
+                    <TableCell className="font-mono text-[11px] text-muted-foreground">
+                      {tx.refNo}
+                    </TableCell>
+                    <TableCell>
+                      <span className="inline-flex rounded-[2px] border border-border bg-secondary px-2 py-0.5 font-mono text-[10px]">
+                        {tx.statementType === "credit_card" ? "CC" : "Bank"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs font-medium tabular-nums">
+                      {tx.amount < 0 ? "−" : "+"}
+                      {formatINR(tx.amount)}
+                    </TableCell>
+                    <TableCell className="pr-5 text-right">
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => restore(tx.id)}
+                      >
                         Restore
                       </Button>
                     </TableCell>
@@ -113,8 +158,8 @@ export default function ExcludedTransactionsPage() {
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+        </section>
+      </div>
     </div>
   );
 }

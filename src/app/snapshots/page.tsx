@@ -3,12 +3,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAccounts } from "@/lib/store";
 import type { BankBalanceSnapshot } from "@/lib/types";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Landmark } from "lucide-react";
+import { parseTxnDate as parseDate } from "@/lib/date";
 
 function formatINR(amount: number) {
   return new Intl.NumberFormat("en-IN", {
@@ -17,8 +30,6 @@ function formatINR(amount: number) {
     maximumFractionDigits: 0,
   }).format(Math.abs(amount));
 }
-
-import { parseTxnDate as parseDate } from "@/lib/date";
 
 export default function SnapshotsPage() {
   const { banks, loaded: accountsLoaded } = useAccounts();
@@ -35,7 +46,9 @@ export default function SnapshotsPage() {
   useEffect(() => {
     fetch("/api/balance-snapshots")
       .then((res) => (res.ok ? res.json() : []))
-      .then((rows: BankBalanceSnapshot[]) => setSnapshots(Array.isArray(rows) ? rows : []))
+      .then((rows: BankBalanceSnapshot[]) =>
+        setSnapshots(Array.isArray(rows) ? rows : [])
+      )
       .catch(() => setSnapshots([]))
       .finally(() => setLoaded(true));
   }, []);
@@ -63,7 +76,10 @@ export default function SnapshotsPage() {
   const lastDateForBank = useMemo(() => {
     if (!bankId) return "";
     const rows = transactions.filter(
-      (tx) => tx.bankId === bankId && tx.statementType === "bank_account" && typeof tx.closingBalance === "number"
+      (tx) =>
+        tx.bankId === bankId &&
+        tx.statementType === "bank_account" &&
+        typeof tx.closingBalance === "number"
     );
     if (rows.length === 0) return "";
     return rows.reduce((latest, tx) => {
@@ -121,43 +137,57 @@ export default function SnapshotsPage() {
       setAsOfDate("");
       setClosingBalance("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create snapshot");
+      setError(
+        err instanceof Error ? err.message : "Failed to create snapshot"
+      );
     } finally {
       setSaving(false);
     }
   };
 
   if (!loaded || !accountsLoaded) {
-    return <div className="p-8 text-sm text-muted-foreground">Loading snapshots...</div>;
+    return (
+      <div className="p-6 text-sm text-muted-foreground lg:p-8">
+        Loading balance snapshots…
+      </div>
+    );
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] space-y-6 p-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-widest text-muted-foreground">Bank Tools</p>
-          <h1 className="text-2xl font-semibold tracking-tight">Balance Snapshots</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Add manual snapshots and review existing ones for each bank.
-          </p>
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-14 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-xs sm:px-6 lg:top-0 lg:px-8">
+        <div className="mx-auto flex max-w-[1260px] flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              Balance Snapshots
+            </h1>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Maintain verified closing balance checkpoints across bank
+              accounts.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+            <Landmark className="h-3.5 w-3.5" />
+            <span>{snapshots.length} checkpoints stored</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Landmark className="h-4 w-4" />
-          <span>Closing balances only.</span>
-        </div>
-      </div>
+      </header>
 
-      <div className="grid gap-4 lg:grid-cols-[360px,1fr]">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">New Snapshot</CardTitle>
-            <CardDescription className="text-xs">Manually add a statement snapshot.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground">Bank</label>
-              <Select value={bankId} onValueChange={(v) => setBankId(v ?? "")}>
-                <SelectTrigger>
+      <div className="mx-auto grid max-w-[1260px] gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[360px_1fr] lg:px-8">
+        <section className="h-fit rounded-[4px] border border-border bg-card">
+          <div className="border-b border-border px-5 py-3.5">
+            <h2 className="text-sm font-semibold tracking-tight">
+              New Checkpoint
+            </h2>
+          </div>
+          <div className="space-y-4 p-5">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium">Bank</label>
+              <Select
+                value={bankId}
+                onValueChange={(v) => setBankId(v ?? "")}
+              >
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select a bank" />
                 </SelectTrigger>
                 <SelectContent>
@@ -170,75 +200,100 @@ export default function SnapshotsPage() {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground">As of Date</label>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium">As of Date</label>
               <Input
                 value={asOfDate}
                 onChange={(e) => setAsOfDate(e.target.value)}
                 placeholder="DD/MM/YY or DD/MM/YYYY"
+                className="font-mono"
               />
             </div>
 
             {bankId && lastDateRows.length > 0 && (
-              <div className="rounded-lg border bg-muted/20 p-3">
-                <p className="text-xs font-semibold">Last Date Balances ({lastDateForBank})</p>
-                <p className="text-[11px] text-muted-foreground mb-2">
-                  Pick the last transaction for that date.
+              <div className="rounded-[2px] border border-border bg-secondary p-3">
+                <div className="text-xs font-semibold">
+                  Last Statement Date ({lastDateForBank})
+                </div>
+                <p className="mb-2 mt-0.5 text-[11px] text-muted-foreground">
+                  Pick the final transaction row from that day:
                 </p>
-                <div className="space-y-2 max-h-40 overflow-auto">
+                <div className="max-h-40 space-y-1.5 overflow-auto">
                   {lastDateRows.map((tx) => (
                     <button
                       key={tx.id}
                       type="button"
-                      className={`w-full rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                      className={`w-full rounded-[2px] border px-2.5 py-2 text-left text-xs transition-colors ${
                         Number(closingBalance) === tx.closingBalance
-                          ? "border-primary bg-primary/10"
-                          : "border-border bg-background hover:bg-muted/40"
+                          ? "border-primary bg-accent text-accent-foreground"
+                          : "border-border bg-background hover:bg-muted/60"
                       }`}
                       onClick={() => {
                         setAsOfDate(tx.date);
                         setClosingBalance(String(tx.closingBalance));
                       }}
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="truncate">{tx.narration || "(No narration)"}</span>
-                        <span className="font-semibold tabular-nums">{formatINR(tx.closingBalance)}</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate">
+                          {tx.narration || "(No narration)"}
+                        </span>
+                        <span className="font-mono font-semibold tabular-nums">
+                          {formatINR(tx.closingBalance)}
+                        </span>
                       </div>
-                      {tx.refNo && <p className="mt-1 text-[10px] text-muted-foreground font-mono">{tx.refNo}</p>}
+                      {tx.refNo && (
+                        <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                          {tx.refNo}
+                        </p>
+                      )}
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground">Closing Balance</label>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium">
+                Closing Balance (INR)
+              </label>
               <Input
                 type="number"
                 value={closingBalance}
                 onChange={(e) => setClosingBalance(e.target.value)}
                 placeholder="210468.40"
+                className="font-mono"
               />
             </div>
 
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && (
+              <div className="rounded-[2px] border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {error}
+              </div>
+            )}
 
             <Button onClick={handleCreate} disabled={saving} className="w-full">
-              {saving ? "Saving..." : "Add Snapshot"}
+              {saving ? "Saving…" : "Add Snapshot"}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">Snapshot History</CardTitle>
-            <CardDescription className="text-xs">Latest statement balances by bank.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <section className="overflow-hidden rounded-[4px] border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight">
+                Snapshot History
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Latest closing balances recorded by bank.
+              </p>
+            </div>
             <div className="flex items-center gap-2">
-              <Select value={bankId} onValueChange={(v) => setBankId(v ?? "")}>
-                <SelectTrigger className="w-[220px]">
-                  <SelectValue placeholder="Filter by bank" />
+              <Select
+                value={bankId}
+                onValueChange={(v) => setBankId(v ?? "")}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="All banks" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">All banks</SelectItem>
@@ -249,42 +304,56 @@ export default function SnapshotsPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant="ghost" size="sm" onClick={() => setBankId("")}>Clear</Button>
+              {bankId && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setBankId("")}
+                >
+                  Clear
+                </Button>
+              )}
             </div>
+          </div>
 
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Bank</TableHead>
-                  <TableHead>As of Date</TableHead>
-                  <TableHead>Closing</TableHead>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="pl-5">Bank</TableHead>
+                <TableHead>As of Date</TableHead>
+                <TableHead className="pr-5 text-right">
+                  Closing Balance
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredSnapshots.map((snap) => (
+                <TableRow key={snap.id}>
+                  <TableCell className="pl-5 text-xs font-medium">
+                    {banks.find((bank) => bank.id === snap.bankId)?.name ??
+                      "Unknown"}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {snap.asOfDate}
+                  </TableCell>
+                  <TableCell className="pr-5 text-right font-mono text-xs font-semibold tabular-nums">
+                    {formatINR(snap.closingBalance)}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredSnapshots.map((snap) => (
-                  <TableRow key={snap.id}>
-                    <TableCell className="text-xs font-medium">
-                      {banks.find((bank) => bank.id === snap.bankId)?.name ?? "Unknown"}
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      {snap.asOfDate}
-                    </TableCell>
-                    <TableCell className="text-xs tabular-nums">
-                      {formatINR(snap.closingBalance)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {filteredSnapshots.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-xs text-muted-foreground text-center py-6">
-                      No snapshots found.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+              ))}
+              {filteredSnapshots.length === 0 && (
+                <TableRow>
+                  <TableCell
+                    colSpan={3}
+                    className="py-10 text-center text-xs text-muted-foreground"
+                  >
+                    No snapshots recorded yet.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </section>
       </div>
     </div>
   );

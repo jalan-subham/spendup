@@ -4,10 +4,16 @@ import { Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import { useAccounts, useTransactions } from "@/lib/store";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-
+import { Download } from "lucide-react";
 import { parseTxnDate } from "@/lib/date";
 
 function formatINR(amount: number) {
@@ -20,7 +26,13 @@ function formatINR(amount: number) {
 
 export default function MonthTransactionsPageWrapper() {
   return (
-    <Suspense fallback={<div className="p-8 text-sm text-muted-foreground">Loading...</div>}>
+    <Suspense
+      fallback={
+        <div className="p-6 text-sm text-muted-foreground lg:p-8">
+          Loading…
+        </div>
+      }
+    >
       <MonthTransactionsPage />
     </Suspense>
   );
@@ -70,69 +82,97 @@ function MonthTransactionsPage() {
   };
 
   if (!loaded) {
-    return <div className="p-8 text-sm text-muted-foreground">Loading transactions...</div>;
+    return (
+      <div className="p-6 text-sm text-muted-foreground lg:p-8">
+        Loading period transactions…
+      </div>
+    );
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] space-y-6 p-8">
-      <div>
-        <p className="mb-1 text-xs font-medium uppercase tracking-widest text-muted-foreground">Transactions</p>
-        <h1 className="text-2xl font-semibold tracking-tight">Monthly Transactions</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {from && to ? `Period: ${from} to ${to}` : "All available dates"} · {filtered.length} rows
-        </p>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <CardTitle className="text-sm font-semibold">Transactions List</CardTitle>
-              <CardDescription className="text-xs">Simple list for this period.</CardDescription>
-            </div>
-            <Button variant="outline" size="sm" onClick={handleDownload} disabled={filtered.length === 0}>
-              Download XLSX
-            </Button>
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-14 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-xs sm:px-6 lg:top-0 lg:px-8">
+        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              Monthly Transactions
+            </h1>
+            <p className="mt-0.5 font-mono text-xs text-muted-foreground tabular-nums">
+              {from && to ? `${from} → ${to}` : "All available dates"} ·{" "}
+              {filtered.length} rows
+            </p>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownload}
+            disabled={filtered.length === 0}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export XLSX
+          </Button>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-[1320px] px-4 py-6 sm:px-6 lg:px-8">
+        <section className="overflow-hidden rounded-[4px] border border-border bg-card">
           <Table>
             <TableHeader>
-              <TableRow className="border-y">
-                <TableHead className="text-xs">Date</TableHead>
-                <TableHead className="text-xs">Narration</TableHead>
-                <TableHead className="text-xs">Type</TableHead>
-                <TableHead className="text-xs text-right">Amount</TableHead>
-                <TableHead className="text-xs text-right">Closing Balance</TableHead>
-                <TableHead className="text-xs">Ref No</TableHead>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="pl-5">Date</TableHead>
+                <TableHead>Narration</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="text-right">Closing Balance</TableHead>
+                <TableHead className="pr-5">Ref No</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((t) => (
                 <TableRow key={t.id}>
-                  <TableCell className="text-xs font-mono text-muted-foreground whitespace-nowrap">{t.date}</TableCell>
-                  <TableCell className="max-w-[320px] truncate text-xs font-medium">{t.narration}</TableCell>
-                  <TableCell className="text-xs">{t.transactionType}</TableCell>
-                  <TableCell className={`text-right text-xs tabular-nums ${t.amount >= 0 ? "text-emerald-600" : "text-foreground"}`}>
-                    {t.amount >= 0 ? "+" : "-"}{formatINR(t.amount)}
+                  <TableCell className="pl-5 font-mono text-xs text-muted-foreground">
+                    {t.date}
                   </TableCell>
-                  <TableCell className="text-right text-xs tabular-nums">
-                    {t.closingBalance != null ? formatINR(t.closingBalance) : "-"}
+                  <TableCell className="max-w-[340px] truncate text-xs font-medium">
+                    {t.narration}
                   </TableCell>
-                  <TableCell className="text-xs font-mono text-muted-foreground">{t.refNo}</TableCell>
+                  <TableCell>
+                    <span className="inline-flex rounded-[2px] border border-border bg-secondary px-2 py-0.5 font-mono text-[11px]">
+                      {t.transactionType}
+                    </span>
+                  </TableCell>
+                  <TableCell
+                    className={`text-right font-mono text-xs font-medium tabular-nums ${
+                      t.amount >= 0 ? "text-success" : "text-foreground"
+                    }`}
+                  >
+                    {t.amount >= 0 ? "+" : "-"}
+                    {formatINR(t.amount)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs text-muted-foreground tabular-nums">
+                    {t.closingBalance != null
+                      ? formatINR(t.closingBalance)
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="pr-5 font-mono text-[11px] text-muted-foreground">
+                    {t.refNo}
+                  </TableCell>
                 </TableRow>
               ))}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-16 text-center text-xs text-muted-foreground">
+                  <TableCell
+                    colSpan={6}
+                    className="h-20 text-center text-xs text-muted-foreground"
+                  >
                     No transactions for this period.
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+        </section>
+      </div>
     </div>
   );
 }

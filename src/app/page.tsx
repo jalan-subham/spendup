@@ -1,23 +1,62 @@
 "use client";
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import type { BankBalanceSnapshot, Transaction } from "@/lib/types";
 import { useAccounts, useTransactions } from "@/lib/store";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts";
-import { ArrowDownRight, ArrowUpRight, ChevronLeft, ChevronRight, IndianRupee, Search, TrendingUp, PiggyBank, Landmark, AlertTriangle, X } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Search,
+  Upload,
+  X,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { parseTxnDate } from "@/lib/date";
 
-const PIE_COLORS = ["#0d9488", "#f59e0b", "#6366f1", "#ef4444", "#22c55e", "#3b82f6", "#ec4899", "#64748b"];
+const PIE_COLORS = [
+  "#6c35f5",
+  "#0b7d55",
+  "#0088e5",
+  "#d67f2e",
+  "#b500bf",
+  "#cf3f48",
+  "#581ccb",
+  "#6b6b6b",
+];
 
 const chartConfig = {
   amount: {
-    label: "Amount",
-    theme: { light: "hsl(var(--chart-1))", dark: "oklch(0.74 0.17 248)" },
+    label: "Spend",
+    theme: { light: "#6c35f5", dark: "#968dfa" },
   },
 } satisfies ChartConfig;
 
@@ -29,8 +68,6 @@ function formatINR(amount: number) {
   }).format(Math.abs(amount));
 }
 
-import { parseTxnDate } from "@/lib/date";
-
 function txnMonth(s: string): string {
   const ts = parseTxnDate(s);
   if (!ts) return "";
@@ -40,14 +77,30 @@ function txnMonth(s: string): string {
 
 function monthLabel(ym: string): string {
   const [y, m] = ym.split("-");
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
   return `${months[parseInt(m, 10) - 1]} ${y}`;
 }
 
 function formatShortDate(s: string): string {
   const ts = parseTxnDate(s);
   if (!ts) return s;
-  return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" }).format(ts);
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+  }).format(ts);
 }
 
 function monthRange(ym: string): { from: string; to: string } | null {
@@ -58,14 +111,25 @@ function monthRange(ym: string): { from: string; to: string } | null {
   if (!year || !month) return null;
   const start = new Date(year, month - 1, 1);
   const end = new Date(year, month, 0);
-  const from = start.toISOString().slice(0, 10);
-  const to = end.toISOString().slice(0, 10);
-  return { from, to };
+  return {
+    from: start.toISOString().slice(0, 10),
+    to: end.toISOString().slice(0, 10),
+  };
 }
 
-// Sanity check helpers
-const ALLOWED_POSITIVE = new Set(["income", "refund", "refund_settlement", "transfer_in"]);
-const ALLOWED_NEGATIVE = new Set(["spend", "transfer_out", "investment", "cc_settlement", "income_debit"]);
+const ALLOWED_POSITIVE = new Set([
+  "income",
+  "refund",
+  "refund_settlement",
+  "transfer_in",
+]);
+const ALLOWED_NEGATIVE = new Set([
+  "spend",
+  "transfer_out",
+  "investment",
+  "cc_settlement",
+  "income_debit",
+]);
 
 export default function Home() {
   const { banks, loaded: accountsLoaded } = useAccounts();
@@ -79,21 +143,30 @@ export default function Home() {
   useEffect(() => {
     fetch("/api/balance-snapshots")
       .then((res) => (res.ok ? res.json() : []))
-      .then((rows: BankBalanceSnapshot[]) => setSnapshots(Array.isArray(rows) ? rows : []))
+      .then((rows: BankBalanceSnapshot[]) =>
+        setSnapshots(Array.isArray(rows) ? rows : [])
+      )
       .catch(() => setSnapshots([]))
       .finally(() => setSnapshotsLoaded(true));
   }, []);
 
-  // Month picker - default to current month
   const allMonths = useMemo(() => {
     const set = new Set<string>();
-    transactions.forEach((t) => { const m = txnMonth(t.date); if (m) set.add(m); });
+    transactions.forEach((t) => {
+      const m = txnMonth(t.date);
+      if (m) set.add(m);
+    });
     return Array.from(set).sort();
   }, [transactions]);
 
   const now = new Date();
-  const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const defaultMonth = allMonths.includes(currentYM) ? currentYM : allMonths[allMonths.length - 1] || currentYM;
+  const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}`;
+  const defaultMonth = allMonths.includes(currentYM)
+    ? currentYM
+    : allMonths[allMonths.length - 1] || currentYM;
   const [selectedMonth, setSelectedMonth] = useState("");
   const activeMonth = selectedMonth || defaultMonth;
 
@@ -104,18 +177,28 @@ export default function Home() {
   const goNext = () => canNext && setSelectedMonth(allMonths[monthIdx + 1]);
   const isAllTime = activeMonth === "all";
   const activeMonthRange = !isAllTime ? monthRange(activeMonth) : null;
+
   const openMonthTransactions = () => {
     if (!activeMonthRange) return;
-    const params = new URLSearchParams({ from: activeMonthRange.from, to: activeMonthRange.to });
-    window.open(`/month-transactions?${params.toString()}`, "_blank", "noopener,noreferrer");
+    const params = new URLSearchParams({
+      from: activeMonthRange.from,
+      to: activeMonthRange.to,
+    });
+    window.open(
+      `/month-transactions?${params.toString()}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
   };
 
   const monthTxns = useMemo(() => {
-    if (isAllTime) return transactions.filter((t) => t.transactionType !== "excluded");
-    return transactions.filter((t) => txnMonth(t.date) === activeMonth && t.transactionType !== "excluded");
+    if (isAllTime)
+      return transactions.filter((t) => t.transactionType !== "excluded");
+    return transactions.filter(
+      (t) => txnMonth(t.date) === activeMonth && t.transactionType !== "excluded"
+    );
   }, [transactions, activeMonth, isAllTime]);
 
-  // Sanity violations (all-time)
   const sanityViolations = useMemo(() => {
     return transactions.filter((t) => {
       if (t.transactionType === "excluded") return false;
@@ -143,13 +226,11 @@ export default function Home() {
       switch (tx.transactionType) {
         case "spend":
           actualSpend += abs;
-          // Category breakdown
           if (tx.category && tx.category !== "Other") {
             categoryMap[tx.category] = (categoryMap[tx.category] ?? 0) + abs;
           } else {
             categoryMap["Other"] = (categoryMap["Other"] ?? 0) + abs;
           }
-          // Daily spend
           dailySpendMap.set(tx.date, (dailySpendMap.get(tx.date) ?? 0) + abs);
           break;
         case "income":
@@ -175,7 +256,10 @@ export default function Home() {
     }
 
     const netIncome = incomeSum + refundSum;
-    const savingsRate = netIncome > 0 ? Math.round(((netIncome - actualSpend) / netIncome) * 100) : 0;
+    const savingsRate =
+      netIncome > 0
+        ? Math.round(((netIncome - actualSpend) / netIncome) * 100)
+        : 0;
 
     const categoryData = Object.entries(categoryMap)
       .sort((a, b) => b[1] - a[1])
@@ -204,7 +288,11 @@ export default function Home() {
   const categoryTransactions = useMemo(() => {
     if (!selectedCategory) return [];
     return monthTxns
-      .filter((t) => t.transactionType === "spend" && (t.category || "Other") === selectedCategory)
+      .filter(
+        (t) =>
+          t.transactionType === "spend" &&
+          (t.category || "Other") === selectedCategory
+      )
       .sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date));
   }, [monthTxns, selectedCategory]);
 
@@ -218,13 +306,20 @@ export default function Home() {
             (t.category || "").toLowerCase().includes(query)
         )
       : monthTxns;
-    return [...filtered].sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date)).slice(0, 15);
+    return [...filtered]
+      .sort((a, b) => parseTxnDate(b.date) - parseTxnDate(a.date))
+      .slice(0, 15);
   }, [monthTxns, deferredSearch]);
 
   const bankBalances = useMemo(() => {
     const latestByBank = new Map<string, Transaction>();
     for (const tx of transactions) {
-      if (tx.statementType !== "bank_account" || tx.bankId == null || typeof tx.closingBalance !== "number") continue;
+      if (
+        tx.statementType !== "bank_account" ||
+        tx.bankId == null ||
+        typeof tx.closingBalance !== "number"
+      )
+        continue;
       const existing = latestByBank.get(tx.bankId);
       if (!existing || parseTxnDate(tx.date) > parseTxnDate(existing.date)) {
         latestByBank.set(tx.bankId, tx);
@@ -254,372 +349,766 @@ export default function Home() {
         bankId: bank.id,
         bankName: bank.name,
         bankColor: bank.color,
-        closingBalance: latestSnapshot?.closingBalance ?? latest?.closingBalance,
+        closingBalance:
+          latestSnapshot?.closingBalance ?? latest?.closingBalance,
         asOfDate: latestSnapshot?.asOfDate ?? latest?.date,
       };
     });
   }, [banks, transactions, snapshots]);
 
+  const totalVerifiedBalance = useMemo(() => {
+    return bankBalances.reduce(
+      (sum, item) => sum + (item.closingBalance ?? 0),
+      0
+    );
+  }, [bankBalances]);
+
+  const bankMap = useMemo(() => {
+    return new Map(banks.map((b) => [b.id, b]));
+  }, [banks]);
+
   if (!transactionsLoaded || !accountsLoaded || !snapshotsLoaded) {
-    return <div className="p-8 text-sm text-muted-foreground">Loading dashboard...</div>;
+    return (
+      <div className="space-y-6 p-6 lg:p-8">
+        <div className="h-14 border-b border-border" />
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-24 animate-pulse rounded-[4px] border border-border bg-secondary"
+            />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="mx-auto max-w-[1260px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-      {/* Header with month nav */}
-      <div className="rounded-3xl border border-border/70 bg-gradient-to-br from-slate-50 via-background to-emerald-50/70 p-5 shadow-sm dark:from-slate-900/60 dark:via-slate-950 dark:to-emerald-950/30">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">SpendUp</p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight">Financial Overview</h1>
+    <div className="min-h-screen bg-background">
+      {/* Top command bar */}
+      <header className="sticky top-14 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-xs sm:px-6 lg:top-0 lg:px-8">
+        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center justify-between gap-3">
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              Financial Overview
+            </h1>
+            <span className="font-mono text-xs text-muted-foreground tabular-nums">
+              {metrics.txnCount} txns · {metrics.spendCount} spends
+              {isAllTime ? " (all)" : ""}
+            </span>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={goPrev} disabled={!canPrev || isAllTime}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <button
-              onClick={() => setSelectedMonth(activeMonth === "all" ? defaultMonth : "all")}
-              className="min-w-[120px] rounded-xl border border-border/70 bg-background/80 px-4 py-1.5 text-center text-sm font-semibold tabular-nums backdrop-blur-sm transition-colors hover:bg-muted/60"
-            >
-              {isAllTime ? "All Time" : monthLabel(activeMonth)}
-            </button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={goNext} disabled={!canNext || isAllTime}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center rounded-[2px] border border-border bg-secondary">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={goPrev}
+                disabled={!canPrev || isAllTime}
+                aria-label="Previous month"
+                className="rounded-none border-r border-border"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedMonth(activeMonth === "all" ? defaultMonth : "all")
+                }
+                title="Click to toggle All Time"
+                className="min-w-[112px] px-3 py-1 text-center font-mono text-xs font-medium tabular-nums transition-colors hover:bg-muted"
+              >
+                {isAllTime ? "All Time" : monthLabel(activeMonth)}
+              </button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={goNext}
+                disabled={!canNext || isAllTime}
+                aria-label="Next month"
+                className="rounded-none border-l border-border"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+
             <Button
               variant="outline"
               size="sm"
-              className="h-8"
               disabled={!activeMonthRange}
               onClick={openMonthTransactions}
             >
-              View Month Transactions
+              Month Ledger
+              <ArrowUpRight className="h-3.5 w-3.5" />
             </Button>
+
+            <Link
+              href="/transactions"
+              className="inline-flex h-7 items-center gap-1.5 rounded-[2px] bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors duration-120 hover:bg-[#581ccb] dark:hover:bg-[#7e64fb]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Import Statement
+            </Link>
           </div>
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {metrics.txnCount} transactions · {metrics.spendCount} spends{isAllTime ? " (all time)" : ""}
-        </p>
-      </div>
+      </header>
 
-      {/* Sanity alert */}
-      {sanityViolations.length > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-amber-300/50 bg-amber-50/80 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-300">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>
-            <strong>{sanityViolations.length}</strong> transaction{sanityViolations.length > 1 ? "s have" : " has"} sign/type mismatches.{" "}
-            <a href="/sanity" className="underline font-medium">Fix in Sanity →</a>
-          </span>
-        </div>
-      )}
-
-      {/* Top metrics */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Card className="border-none bg-gradient-to-br from-rose-600 to-rose-700 text-rose-50">
-          <CardContent className="p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wide opacity-90">Actual Spend</span>
-              <ArrowDownRight className="h-4 w-4 opacity-80" />
+      <div className="mx-auto max-w-[1320px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        {/* Sanity alert strip */}
+        {sanityViolations.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[2px] border border-[#e0bf00]/60 bg-[#fffbc2] px-4 py-2.5 text-xs text-[#614e00] dark:border-[#ecd60e]/30 dark:bg-[#2e2600]/60 dark:text-[#faf1a3]">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>
+                <strong className="font-semibold tabular-nums">
+                  {sanityViolations.length}
+                </strong>{" "}
+                transaction{sanityViolations.length > 1 ? "s have" : " has"}{" "}
+                sign/type mismatches awaiting audit.
+              </span>
             </div>
-            <p className="text-2xl font-semibold tabular-nums">{formatINR(metrics.actualSpend)}</p>
-            <p className="mt-1 text-xs text-rose-200">Goods & services only</p>
-          </CardContent>
-        </Card>
+            <Link
+              href="/sanity"
+              className="font-mono font-semibold underline underline-offset-3 hover:opacity-80"
+            >
+              Review in Sanity →
+            </Link>
+          </div>
+        )}
 
-        <Card className="border-none bg-gradient-to-br from-emerald-600 to-emerald-700 text-emerald-50">
-          <CardContent className="p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wide opacity-90">Income</span>
-              <ArrowUpRight className="h-4 w-4 opacity-80" />
+        {/* Border-joined 4-cell KPI grid */}
+        <section
+          aria-label="Monthly summary metrics"
+          data-slot="kpi-grid"
+          className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-[4px] border border-border bg-card lg:grid-cols-4 lg:divide-x lg:divide-y-0"
+        >
+          <div className="p-5 odd:border-r odd:border-border lg:odd:border-r-0">
+            <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Actual Spend
             </div>
-            <p className="text-2xl font-semibold tabular-nums">{formatINR(metrics.netIncome)}</p>
-            <p className="mt-1 text-xs text-emerald-200">Salary + refunds</p>
-          </CardContent>
-        </Card>
+            <div className="mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums">
+              {formatINR(metrics.actualSpend)}
+            </div>
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              Goods &amp; services only
+            </div>
+          </div>
 
-        <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
-          <CardContent className="p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Savings Rate</span>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          <div className="p-5">
+            <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Net Income
             </div>
-            <p className={`text-2xl font-semibold tabular-nums ${metrics.savingsRate >= 0 ? "text-emerald-500" : "text-destructive"}`}>
+            <div className="mt-2 font-mono text-2xl font-semibold tracking-tight text-success tabular-nums">
+              {formatINR(metrics.netIncome)}
+            </div>
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              Salary + {formatINR(metrics.refundSum)} refunds
+            </div>
+          </div>
+
+          <div className="p-5 odd:border-r odd:border-border lg:odd:border-r-0">
+            <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Savings Rate
+            </div>
+            <div
+              className={`mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums ${
+                metrics.savingsRate >= 0 ? "text-success" : "text-destructive"
+              }`}
+            >
               {metrics.savingsRate}%
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">(Income − Spend) / Income</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
-          <CardContent className="p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Investments</span>
-              <PiggyBank className="h-4 w-4 text-muted-foreground" />
             </div>
-            <p className="text-2xl font-semibold tabular-nums text-violet-500">{formatINR(metrics.investSum)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">SIPs, MFs, stocks</p>
-          </CardContent>
-        </Card>
-      </div>
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              (Income − Spend) / Income
+            </div>
+          </div>
 
-      {/* Money flow breakdown */}
-      <Card className="border-border/70 bg-card/85 backdrop-blur-md dark:bg-slate-900/70">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold">Money Flow</CardTitle>
-          <CardDescription className="text-xs">Where your money went this period. CC settlements are internal movements, not spend.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="p-5">
+            <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Investments
+            </div>
+            <div className="mt-2 font-mono text-2xl font-semibold tracking-tight text-iris-ink tabular-nums">
+              {formatINR(metrics.investSum)}
+            </div>
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              SIPs, MFs &amp; equities
+            </div>
+          </div>
+        </section>
+
+        {/* Horizontal Reconciliation & Money-Flow Pipeline */}
+        <section
+          aria-label="Reconciliation and money flow pipeline"
+          className="overflow-hidden rounded-[4px] border border-border bg-secondary"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
+            <h2 className="text-xs font-semibold tracking-tight">
+              Reconciliation &amp; Money Flow
+            </h2>
+            <span className="font-mono text-[11px] text-muted-foreground">
+              CC settlements excluded from net spend
+            </span>
+          </div>
+          <div className="grid grid-cols-2 divide-y divide-border sm:grid-cols-3 lg:grid-cols-5 lg:divide-x lg:divide-y-0">
             {[
-              { label: "CC Settlements", amount: metrics.ccSettleSum, color: "text-amber-500", caption: "Internal: bank → card" },
-              { label: "Investments", amount: metrics.investSum, color: "text-violet-500", caption: "Capital deployed" },
-              { label: "Transfers Out", amount: metrics.transferOut, color: "text-sky-500", caption: "To other accounts" },
-              { label: "Transfers In", amount: metrics.transferIn, color: "text-cyan-500", caption: "From other accounts" },
-              { label: "Refunds", amount: metrics.refundSum, color: "text-emerald-500", caption: "Money returned" },
-            ].map((item) => (
-              <div key={item.label} className="rounded-xl border border-border/60 bg-background/50 p-3 dark:bg-slate-900/40">
-                <p className="text-[11px] text-muted-foreground">{item.label}</p>
-                <p className={`mt-1 text-sm font-semibold tabular-nums ${item.color}`}>{formatINR(item.amount)}</p>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">{item.caption}</p>
+              {
+                label: "Income Inflow",
+                amount: metrics.netIncome,
+                dot: "bg-success",
+                caption: "Credits & refunds",
+              },
+              {
+                label: "CC Settlements",
+                amount: metrics.ccSettleSum,
+                dot: "bg-primary",
+                caption: "Internal: bank → card",
+              },
+              {
+                label: "Transfers Out",
+                amount: metrics.transferOut,
+                dot: "bg-[#0088e5] dark:bg-[#70c5ff]",
+                caption: "To other accounts",
+              },
+              {
+                label: "Transfers In",
+                amount: metrics.transferIn,
+                dot: "bg-[#0088e5] dark:bg-[#70c5ff]",
+                caption: "From other accounts",
+              },
+              {
+                label: "Verified Balances",
+                amount: totalVerifiedBalance,
+                dot:
+                  bankBalances.some((b) => b.closingBalance != null)
+                    ? "bg-success"
+                    : "bg-muted-foreground",
+                caption: `${bankBalances.length} bank account${
+                  bankBalances.length === 1 ? "" : "s"
+                }`,
+              },
+            ].map((node) => (
+              <div key={node.label} className="px-4 py-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className={`h-2 w-2 rounded-full ${node.dot}`} />
+                  <span>{node.label}</span>
+                </div>
+                <div className="mt-1.5 font-mono text-sm font-semibold tabular-nums">
+                  {formatINR(node.amount)}
+                </div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  {node.caption}
+                </div>
               </div>
             ))}
           </div>
-        </CardContent>
-      </Card>
+        </section>
 
-      {/* Balances */}
-      <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold">Bank Balances</CardTitle>
-          <CardDescription className="text-xs">Latest closing balance from uploaded statements.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {bankBalances.length === 0 ? (
-            <div className="text-xs text-muted-foreground">No bank accounts configured yet.</div>
-          ) : (
-            <div className="space-y-2">
-              {bankBalances.map((item) => (
-                <div key={item.bankId} className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/35 px-3 py-2.5 dark:bg-slate-900/40">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.bankColor }} />
-                    <div>
-                      <p className="text-sm font-medium">{item.bankName}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {item.closingBalance != null ? `As of ${formatShortDate(item.asOfDate!)}` : "No statement data"}
-                      </p>
-                    </div>
+        {/* Empty state when no transactions exist */}
+        {transactions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-[4px] border border-dashed border-border bg-secondary/50 px-6 py-16 text-center">
+            <div className="flex h-10 w-10 items-center justify-center rounded-[2px] border border-border bg-background">
+              <Upload className="h-4 w-4 text-primary" />
+            </div>
+            <h2 className="mt-4 text-base font-semibold tracking-tight">
+              No statements imported yet
+            </h2>
+            <p className="mt-1.5 max-w-md text-xs leading-relaxed text-muted-foreground">
+              Add your bank accounts in Settings, then upload an HDFC text
+              export, ICICI Excel sheet, or encrypted credit card PDF to
+              populate your ledger.
+            </p>
+            <div className="mt-5 flex items-center gap-2.5">
+              <Link
+                href="/settings"
+                className="inline-flex h-8 items-center rounded-[2px] border border-border bg-background px-3 text-xs font-medium hover:bg-secondary"
+              >
+                Configure Banks
+              </Link>
+              <Link
+                href="/transactions"
+                className="inline-flex h-8 items-center rounded-[2px] bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-[#581ccb]"
+              >
+                Import First Statement
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Work grid: Daily Spend + Verified Balances & Category Breakdown */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+              {/* Daily Spend Area Chart */}
+              <div className="rounded-[4px] border border-border bg-card lg:col-span-7">
+                <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+                  <div>
+                    <h2 className="text-sm font-semibold tracking-tight">
+                      Daily Spend Trend
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Settled goods &amp; services per day
+                    </p>
                   </div>
-                  <p className="text-sm font-semibold tabular-nums">
-                    {item.closingBalance != null ? formatINR(item.closingBalance) : "-"}
-                  </p>
+                  <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                    {isAllTime ? "All Time" : monthLabel(activeMonth)}
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Charts */}
-      {monthTxns.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-7">
-          <Card className="border-border/70 bg-card/80 backdrop-blur-sm lg:col-span-4 dark:bg-slate-900/70">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-sm font-semibold">Daily Spend Trend</CardTitle>
-              <CardDescription className="text-xs">Spend per day (goods & services only)</CardDescription>
-            </CardHeader>
-            <CardContent className="px-2 pt-4">
-              <ChartContainer config={chartConfig} className="h-[220px] w-full">
-                <AreaChart data={metrics.areaData} margin={{ left: 0, right: 16, top: 4, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="fillAmount" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-amount)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="var(--color-amount)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid vertical={false} stroke="hsl(var(--border))" strokeOpacity={0.45} strokeDasharray="3 3" />
-                  <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} className="text-[10px]" />
-                  <YAxis tickLine={false} axisLine={false} tickMargin={8} className="text-[10px]" tickFormatter={(v) => `₹${Math.round(v / 1000)}k`} />
-                  <ChartTooltip content={<ChartTooltipContent formatter={(v) => [formatINR(Number(v)), "Spend"]} />} />
-                  <Area dataKey="amount" type="monotone" fill="url(#fillAmount)" stroke="var(--color-amount)" strokeWidth={2} />
-                </AreaChart>
-              </ChartContainer>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/70 bg-card/80 backdrop-blur-sm lg:col-span-3 dark:bg-slate-900/70">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-sm font-semibold">Category Breakdown</CardTitle>
-              <CardDescription className="text-xs">Where you spent</CardDescription>
-            </CardHeader>
-            <CardContent className="px-2 pt-4">
-              {metrics.categoryData.length > 0 ? (
-                <ChartContainer config={chartConfig} className="h-[220px] w-full">
-                  <PieChart>
-                    <Pie data={metrics.categoryData} dataKey="amount" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2} cursor="pointer" onClick={(_: unknown, idx: number) => setSelectedCategory(metrics.categoryData[idx]?.name ?? null)}>
-                      {metrics.categoryData.map((entry, i) => (
-                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} opacity={selectedCategory && selectedCategory !== entry.name ? 0.3 : 1} stroke={selectedCategory === entry.name ? "hsl(var(--foreground))" : "transparent"} strokeWidth={selectedCategory === entry.name ? 2 : 0} />
-                      ))}
-                    </Pie>
-                    <ChartTooltip content={<ChartTooltipContent hideLabel formatter={(v, name) => [formatINR(Number(v)), name as string]} />} />
-                  </PieChart>
-                </ChartContainer>
-              ) : (
-                <div className="flex h-[220px] items-center justify-center text-xs text-muted-foreground">No spend data</div>
-              )}
-              <div className="mt-2 grid grid-cols-2 gap-1">
-                {metrics.categoryData.slice(0, 8).map((c, i) => (
-                  <button
-                    key={c.name}
-                    onClick={() => setSelectedCategory(selectedCategory === c.name ? null : c.name)}
-                    className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[10px] text-left transition-colors ${selectedCategory === c.name ? "bg-accent font-semibold text-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"}`}
-                  >
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
-                    {c.name}: {formatINR(c.amount)}
-                  </button>
-                ))}
+                <div className="p-4">
+                  {metrics.areaData.length > 0 ? (
+                    <ChartContainer
+                      config={chartConfig}
+                      className="h-[230px] w-full"
+                    >
+                      <AreaChart
+                        data={metrics.areaData}
+                        margin={{ left: 0, right: 12, top: 8, bottom: 0 }}
+                      >
+                        <defs>
+                          <linearGradient
+                            id="spendFill"
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop
+                              offset="5%"
+                              stopColor="var(--color-amount)"
+                              stopOpacity={0.22}
+                            />
+                            <stop
+                              offset="95%"
+                              stopColor="var(--color-amount)"
+                              stopOpacity={0}
+                            />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid
+                          vertical={false}
+                          stroke="var(--border)"
+                          strokeDasharray="3 3"
+                        />
+                        <XAxis
+                          dataKey="day"
+                          tickLine={false}
+                          axisLine={false}
+                          tickMargin={8}
+                          className="font-mono text-[10px]"
+                        />
+                        <YAxis
+                          tickLine={false}
+                          axisLine={false}
+                          tickMargin={8}
+                          className="font-mono text-[10px]"
+                          tickFormatter={(v) => `₹${Math.round(v / 1000)}k`}
+                        />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              formatter={(v) => [formatINR(Number(v)), "Spend"]}
+                            />
+                          }
+                        />
+                        <Area
+                          dataKey="amount"
+                          type="monotone"
+                          fill="url(#spendFill)"
+                          stroke="var(--color-amount)"
+                          strokeWidth={1.75}
+                        />
+                      </AreaChart>
+                    </ChartContainer>
+                  ) : (
+                    <div className="flex h-[230px] items-center justify-center text-xs text-muted-foreground">
+                      No daily spend data for this period.
+                    </div>
+                  )}
+                </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
-      {/* Category drill-down */}
-      {selectedCategory && (
-        <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="text-sm font-semibold">{selectedCategory}</CardTitle>
-              <CardDescription className="text-xs">
-                {categoryTransactions.length} transaction{categoryTransactions.length !== 1 ? "s" : ""} · {formatINR(categoryTransactions.reduce((s, t) => s + Math.abs(t.amount), 0))} total
-              </CardDescription>
-            </div>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSelectedCategory(null)}>
-              <X className="h-4 w-4" />
-            </Button>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-y hover:bg-transparent">
-                  <TableHead className="pl-6 text-xs">Date</TableHead>
-                  <TableHead className="text-xs">Description</TableHead>
-                  <TableHead className="text-xs">Payment</TableHead>
-                  <TableHead className="pr-6 text-right text-xs">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {categoryTransactions.map((tx) => (
-                  <TableRow key={tx.id}>
-                    <TableCell className="pl-6 font-mono text-xs text-muted-foreground">{formatShortDate(tx.date)}</TableCell>
-                    <TableCell className="max-w-[300px] truncate text-sm font-medium">{tx.narration}</TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        {tx.paymentMethod || "Other"}
-                      </span>
-                    </TableCell>
-                    <TableCell className="pr-6 text-right text-sm font-medium tabular-nums">
-                      {formatINR(tx.amount)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {categoryTransactions.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={4} className="h-16 text-center text-xs text-muted-foreground">No transactions.</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+              {/* Bank Balances & Category Breakdown */}
+              <div className="flex flex-col gap-4 lg:col-span-5">
+                {/* Bank Balances */}
+                <div className="rounded-[4px] border border-border bg-card">
+                  <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+                    <h2 className="text-sm font-semibold tracking-tight">
+                      Bank Balances
+                    </h2>
+                    <Link
+                      href="/snapshots"
+                      className="text-xs font-medium text-iris-ink hover:underline"
+                    >
+                      Snapshots →
+                    </Link>
+                  </div>
+                  {bankBalances.length === 0 ? (
+                    <div className="px-5 py-6 text-xs text-muted-foreground">
+                      No bank accounts configured yet.{" "}
+                      <Link href="/settings" className="text-iris-ink underline">
+                        Add bank
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {bankBalances.map((item) => (
+                        <div
+                          key={item.bankId}
+                          className="flex items-center justify-between px-5 py-3"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-[1px]"
+                              style={{ backgroundColor: item.bankColor }}
+                            />
+                            <div>
+                              <div className="text-sm font-medium">
+                                {item.bankName}
+                              </div>
+                              <div className="font-mono text-[11px] text-muted-foreground">
+                                {item.closingBalance != null && item.asOfDate
+                                  ? `As of ${formatShortDate(item.asOfDate)}`
+                                  : "No statement data"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="font-mono text-sm font-semibold tabular-nums">
+                            {item.closingBalance != null
+                              ? formatINR(item.closingBalance)
+                              : "—"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-      {/* Recent transactions */}
-      {monthTxns.length > 0 && (
-        <Card className="border-border/70 bg-card/80 backdrop-blur-sm dark:bg-slate-900/70">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="text-sm font-semibold">Recent Transactions</CardTitle>
-              <CardDescription className="text-xs">{isAllTime ? "All time" : monthLabel(activeMonth)}</CardDescription>
+                {/* Category Breakdown */}
+                <div className="flex-1 rounded-[4px] border border-border bg-card">
+                  <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+                    <h2 className="text-sm font-semibold tracking-tight">
+                      Category Breakdown
+                    </h2>
+                    {selectedCategory && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCategory(null)}
+                        className="font-mono text-[11px] text-iris-ink hover:underline"
+                      >
+                        Clear filter
+                      </button>
+                    )}
+                  </div>
+                  {metrics.categoryData.length > 0 ? (
+                    <div className="grid grid-cols-1 items-center gap-3 p-4 sm:grid-cols-2">
+                      <ChartContainer
+                        config={chartConfig}
+                        className="h-[150px] w-full"
+                      >
+                        <PieChart>
+                          <Pie
+                            data={metrics.categoryData}
+                            dataKey="amount"
+                            nameKey="name"
+                            innerRadius={38}
+                            outerRadius={64}
+                            paddingAngle={2}
+                            cursor="pointer"
+                            onClick={(_: unknown, idx: number) => {
+                              const next = metrics.categoryData[idx]?.name ?? null;
+                              setSelectedCategory(
+                                selectedCategory === next ? null : next
+                              );
+                            }}
+                          >
+                            {metrics.categoryData.map((entry, i) => (
+                              <Cell
+                                key={entry.name}
+                                fill={PIE_COLORS[i % PIE_COLORS.length]}
+                                opacity={
+                                  selectedCategory &&
+                                  selectedCategory !== entry.name
+                                    ? 0.25
+                                    : 1
+                                }
+                                stroke={
+                                  selectedCategory === entry.name
+                                    ? "var(--foreground)"
+                                    : "transparent"
+                                }
+                                strokeWidth={
+                                  selectedCategory === entry.name ? 1.5 : 0
+                                }
+                              />
+                            ))}
+                          </Pie>
+                          <ChartTooltip
+                            content={
+                              <ChartTooltipContent
+                                hideLabel
+                                formatter={(v, name) => [
+                                  formatINR(Number(v)),
+                                  name as string,
+                                ]}
+                              />
+                            }
+                          />
+                        </PieChart>
+                      </ChartContainer>
+                      <div className="space-y-1">
+                        {metrics.categoryData.slice(0, 6).map((c, i) => {
+                          const active = selectedCategory === c.name;
+                          return (
+                            <button
+                              key={c.name}
+                              type="button"
+                              onClick={() =>
+                                setSelectedCategory(active ? null : c.name)
+                              }
+                              className={`flex w-full items-center justify-between rounded-[2px] px-2 py-1 text-left text-xs transition-colors duration-100 ${
+                                active
+                                  ? "bg-accent text-accent-foreground font-semibold"
+                                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                              }`}
+                            >
+                              <span className="flex items-center gap-2 truncate">
+                                <span
+                                  className="h-2 w-2 shrink-0 rounded-[1px]"
+                                  style={{
+                                    backgroundColor:
+                                      PIE_COLORS[i % PIE_COLORS.length],
+                                  }}
+                                />
+                                <span className="truncate">{c.name}</span>
+                              </span>
+                              <span className="ml-2 font-mono text-[11px] tabular-nums">
+                                {formatINR(c.amount)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex h-[150px] items-center justify-center text-xs text-muted-foreground">
+                      No spend categories this period.
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                type="search"
-                value={recentSearch}
-                onChange={(e) => setRecentSearch(e.target.value)}
-                placeholder="Search..."
-                className="h-8 w-[200px] pl-8 text-xs"
-              />
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-y hover:bg-transparent">
-                  <TableHead className="pl-6 text-xs">Date</TableHead>
-                  <TableHead className="text-xs">Description</TableHead>
-                  <TableHead className="text-xs">Type</TableHead>
-                  <TableHead className="text-xs">Category</TableHead>
-                  <TableHead className="pr-6 text-right text-xs">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentTransactions.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-16 text-center text-xs text-muted-foreground">
-                      No transactions match your search.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  recentTransactions.map((tx) => {
-                    const typeColors: Record<string, string> = {
-                      spend: "", income: "text-emerald-500", refund: "text-emerald-500", refund_settlement: "text-emerald-500",
-                      cc_settlement: "text-amber-500", investment: "text-violet-500", transfer_in: "text-cyan-500",
-                      transfer_out: "text-sky-500", income_debit: "text-orange-500",
-                    };
-                    const typeLabels: Record<string, string> = {
-                      spend: "Spend", income: "Income", refund: "Refund", refund_settlement: "Refund",
-                      cc_settlement: "CC Payment", investment: "Invest", transfer_in: "Transfer In",
-                      transfer_out: "Transfer Out", income_debit: "Income Debit", adjustment: "Adjustment",
-                    };
-                    return (
+
+            {/* Category drill-down */}
+            {selectedCategory && (
+              <section className="overflow-hidden rounded-[4px] border border-primary/40 bg-card">
+                <div className="flex items-center justify-between border-b border-border bg-accent/60 px-5 py-3">
+                  <div>
+                    <h2 className="text-sm font-semibold tracking-tight">
+                      {selectedCategory}
+                    </h2>
+                    <p className="font-mono text-xs text-muted-foreground tabular-nums">
+                      {categoryTransactions.length} transaction
+                      {categoryTransactions.length !== 1 ? "s" : ""} ·{" "}
+                      {formatINR(
+                        categoryTransactions.reduce(
+                          (s, t) => s + Math.abs(t.amount),
+                          0
+                        )
+                      )}{" "}
+                      total
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setSelectedCategory(null)}
+                    aria-label="Close category breakdown"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="pl-5">Date</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Payment</TableHead>
+                      <TableHead className="pr-5 text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {categoryTransactions.map((tx) => (
                       <TableRow key={tx.id}>
-                        <TableCell className="pl-6 font-mono text-xs text-muted-foreground">{formatShortDate(tx.date)}</TableCell>
-                        <TableCell className="max-w-[240px] truncate text-sm font-medium">{tx.narration}</TableCell>
-                        <TableCell>
-                          <span className={`inline-flex items-center rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium ${typeColors[tx.transactionType] || "text-muted-foreground"}`}>
-                            {typeLabels[tx.transactionType] || tx.transactionType}
-                          </span>
+                        <TableCell className="pl-5 font-mono text-xs text-muted-foreground">
+                          {formatShortDate(tx.date)}
+                        </TableCell>
+                        <TableCell className="max-w-[340px] truncate text-sm font-medium">
+                          {tx.narration}
                         </TableCell>
                         <TableCell>
-                          <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                            {tx.category || "Uncategorized"}
+                          <span className="inline-flex items-center rounded-[2px] border border-border bg-secondary px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+                            {tx.paymentMethod || "Other"}
                           </span>
                         </TableCell>
-                        <TableCell className={`pr-6 text-right text-sm font-medium tabular-nums ${tx.amount < 0 ? "text-foreground" : "text-emerald-500"}`}>
-                          {tx.amount < 0 ? `-${formatINR(tx.amount)}` : `+${formatINR(tx.amount)}`}
+                        <TableCell className="pr-5 text-right font-mono text-sm font-medium tabular-nums">
+                          {formatINR(tx.amount)}
                         </TableCell>
                       </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+                    ))}
+                  </TableBody>
+                </Table>
+              </section>
+            )}
 
-      {transactions.length === 0 && (
-        <Card className="border-dashed border-border/70 bg-muted/25">
-          <CardContent className="flex flex-col items-center justify-center gap-3 p-12 text-center text-muted-foreground">
-            <IndianRupee className="h-8 w-8 opacity-20" />
-            <div>
-              <p className="text-sm font-medium">No spending data</p>
-              <p className="mt-1 text-xs">Upload a statement to populate your dashboard charts.</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            {/* Recent Audited Transactions */}
+            {monthTxns.length > 0 && (
+              <section className="overflow-hidden rounded-[4px] border border-border bg-card">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+                  <div>
+                    <h2 className="text-sm font-semibold tracking-tight">
+                      Recent Transactions
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      {isAllTime ? "All time" : monthLabel(activeMonth)} ·{" "}
+                      Showing latest {recentTransactions.length}
+                    </p>
+                  </div>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute top-2 left-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      value={recentSearch}
+                      onChange={(e) => setRecentSearch(e.target.value)}
+                      placeholder="Filter narration or category…"
+                      className="h-8 w-[220px] pl-8 text-xs"
+                    />
+                  </div>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="pl-5">Date</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Account</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead className="pr-5 text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {recentTransactions.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={6}
+                          className="h-20 text-center text-xs text-muted-foreground"
+                        >
+                          No transactions match your search.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      recentTransactions.map((tx) => {
+                        const bank = tx.bankId ? bankMap.get(tx.bankId) : undefined;
+                        const typeBadge: Record<
+                          string,
+                          { label: string; cls: string }
+                        > = {
+                          spend: {
+                            label: "Spend",
+                            cls: "border-border text-foreground",
+                          },
+                          income: {
+                            label: "Income",
+                            cls: "border-success/40 bg-success/10 text-success",
+                          },
+                          refund: {
+                            label: "Refund",
+                            cls: "border-success/40 bg-success/10 text-success",
+                          },
+                          refund_settlement: {
+                            label: "Refund",
+                            cls: "border-success/40 bg-success/10 text-success",
+                          },
+                          cc_settlement: {
+                            label: "CC Settlement",
+                            cls: "border-primary/40 bg-accent text-accent-foreground",
+                          },
+                          investment: {
+                            label: "Invest",
+                            cls: "border-primary/30 text-iris-ink",
+                          },
+                          transfer_in: {
+                            label: "Transfer In",
+                            cls: "border-[#0088e5]/30 text-[#005e9e] dark:text-[#70c5ff]",
+                          },
+                          transfer_out: {
+                            label: "Transfer Out",
+                            cls: "border-[#0088e5]/30 text-[#005e9e] dark:text-[#70c5ff]",
+                          },
+                          income_debit: {
+                            label: "Income Debit",
+                            cls: "border-destructive/40 text-destructive",
+                          },
+                        };
+                        const badge = typeBadge[tx.transactionType] ?? {
+                          label: tx.transactionType,
+                          cls: "border-border text-muted-foreground",
+                        };
+
+                        return (
+                          <TableRow key={tx.id}>
+                            <TableCell className="pl-5 font-mono text-xs text-muted-foreground">
+                              {formatShortDate(tx.date)}
+                            </TableCell>
+                            <TableCell className="max-w-[280px] truncate text-sm font-medium">
+                              {tx.narration}
+                            </TableCell>
+                            <TableCell>
+                              {bank ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-[2px] border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium">
+                                  <span
+                                    className="h-1.5 w-1.5 rounded-[1px]"
+                                    style={{ backgroundColor: bank.color }}
+                                  />
+                                  {bank.name}
+                                </span>
+                              ) : (
+                                <span className="font-mono text-[11px] text-muted-foreground">
+                                  {tx.statementType === "credit_card"
+                                    ? "CC"
+                                    : "Bank"}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <span
+                                className={`inline-flex items-center rounded-[2px] border px-2 py-0.5 font-mono text-[11px] font-medium ${badge.cls}`}
+                              >
+                                {badge.label}
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              <span className="inline-flex items-center rounded-[2px] border border-border bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">
+                                {tx.category || "Uncategorized"}
+                              </span>
+                            </TableCell>
+                            <TableCell
+                              className={`pr-5 text-right font-mono text-sm font-medium tabular-nums ${
+                                tx.amount < 0
+                                  ? "text-foreground"
+                                  : "text-success"
+                              }`}
+                            >
+                              {tx.amount < 0
+                                ? `-${formatINR(tx.amount)}`
+                                : `+${formatINR(tx.amount)}`}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </section>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
